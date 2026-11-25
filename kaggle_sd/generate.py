@@ -3,6 +3,9 @@ Runs ON KAGGLE (GPU). Reads every story JSON from the attached scenes dataset,
 generates one image per scene with Stable Diffusion XL, and saves them to
 /kaggle/working/<story>/scene_XX.png so the laptop can download them.
 
+The look (STYLE / NEGATIVE / format) comes from the story's channel profile, uploaded
+alongside as channel__<name>.json. A story's own "style" / "negative" / "format" win.
+
 The model comes from the attached output of the one-time cache job
 (kaggle_cache/cache_model.py). Hugging Face is switched to offline mode so nothing
 is downloaded by accident; if the cache is missing it falls back to downloading.
@@ -38,11 +41,6 @@ else:
 import torch
 from diffusers import StableDiffusionXLPipeline, AutoencoderKL, DPMSolverMultistepScheduler
 
-# ---------- Channel style (keep fixed so every video looks like one series) ----------
-STYLE = ("biblical illustration, painterly digital art, warm cinematic lighting, "
-         "ancient Middle East setting, rich earthy colours, detailed, soft volumetric light")
-NEGATIVE = ("text, watermark, logo, signature, modern clothing, modern buildings, "
-            "blurry, low quality, deformed hands, extra fingers, extra limbs, distorted face")
 SIZES = {"short": (768, 1344), "long": (1344, 768)}   # vertical Shorts / horizontal long-form
 STEPS, GUIDANCE, BASE_SEED = 30, 6.5, 1234
 OUT_ROOT = "/kaggle/working"
@@ -64,6 +62,18 @@ story_files = [f for f in sorted(glob.glob("/kaggle/input/**/*.json", recursive=
 print(f"Found {len(story_files)} story file(s):", *story_files, sep="\n  ")
 if not story_files:
     sys.exit("No story JSON files found under /kaggle/input")
+
+# ---------- Channel profiles (STYLE / NEGATIVE live there now) ----------
+channels = {}
+for f in glob.glob("/kaggle/input/**/channel__*.json", recursive=True):
+    c = json.load(open(f))
+    channels[c["name"]] = c
+print("Channel profiles:", ", ".join(sorted(channels)) or "none")
+# Check every story's channel BEFORE loading the model, so a typo doesn't waste GPU time
+for f in story_files:
+    ch = json.load(open(f)).get("channel")
+    if ch not in channels:
+        sys.exit(f"{f}: channel '{ch}' has no profile (expected channel__{ch}.json in the dataset)")
 
 # ---------- Load model once ----------
 t0 = time.time()
@@ -109,17 +119,19 @@ for path in story_files:
     story = json.load(open(path))
     story_id = story.get("story") or os.path.splitext(os.path.basename(path))[0]
     chars = story.get("characters", {})
-    style = story.get("style", STYLE)
-    width, height = SIZES[story.get("format", "short")]
+    channel = channels[story["channel"]]
+    style = story.get("style", channel["style"])          # story override wins
+    negative = story.get("negative", channel["negative"])
+    width, height = SIZES[story.get("format", channel.get("format", "short"))]
     out_dir = os.path.join(OUT_ROOT, story_id)
     os.makedirs(out_dir, exist_ok=True)
 
-    print(f"\n=== {story_id}: {len(story['scenes'])} scenes ({width}x{height}) ===")
+    print(f"\n=== {story_id} [{story['channel']}]: {len(story['scenes'])} scenes ({width}x{height}) ===")
     done = []
     for s in story["scenes"]:
         seed = s.get("seed", BASE_SEED + s["id"])
         prompt = f"{fill(s['image_prompt'], chars)}, {style}"
-        img = pipe(prompt=prompt, negative_prompt=story.get("negative", NEGATIVE),
+        img = pipe(prompt=prompt, negative_prompt=negative,
                    width=width, height=height, num_inference_steps=STEPS,
                    guidance_scale=GUIDANCE,
                    generator=torch.Generator("cuda").manual_seed(seed)).images[0]

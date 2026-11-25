@@ -4,3 +4,4 @@ kaggle>=2.0
 six                 # some kaggle versions forget to declare it
 kokoro-onnx>=0.4    # TTS, CPU only (no PyTorch)
 soundfile
+google-genai>=1.0   # script.py: Gemini API (free tier), needs GEMINI_API_KEY

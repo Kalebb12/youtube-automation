@@ -14,6 +14,7 @@ music/
 kaggle_sd/kernel-metadata.json
 kaggle_cache/kernel-metadata.json
 scenes/dataset-metadata.json
+.kaggle_upload/
 
 # Secrets
 kaggle.json

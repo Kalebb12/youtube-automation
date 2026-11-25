@@ -1,0 +1,36 @@
+{
+  "name": "bible",
+  "display_name": "Bible Stories",
+  "language": "en",
+  "narrator": {
+    "persona": "a warm, unhurried storyteller sharing a Bible story with a curious listener",
+    "tone": "reverent but vivid and human; plain modern English; short spoken sentences; no preaching"
+  },
+  "story_rules": [
+    "Retell the passage faithfully: every event, speaker and detail must come from the given text.",
+    "Do not invent events, dialogue, motives, names, numbers or doctrine. If the text doesn't say it, leave it out.",
+    "You may add sensory scene-setting only if it cannot be mistaken for a fact the passage doesn't state.",
+    "Open with a hook drawn from the story itself, not a question to the viewer.",
+    "Quote at most one key verse, word for word from the provided translation, inside quotation marks, and record it in the scene's quote field.",
+    "No application, sermon or moral at the end; end on the story (a cliffhanger is fine for multi-part stories).",
+    "Neutral and respectful toward all faiths; no denominational claims."
+  ],
+  "max_quotes": 1,
+  "quote_translations": [
+    "KJV",
+    "ASV",
+    "WEB"
+  ],
+  "passage_translation": "kjv",
+  "style": "biblical illustration, painterly digital art, warm cinematic lighting, ancient Middle East setting, rich earthy colours, detailed, soft volumetric light",
+  "negative": "text, watermark, logo, signature, modern clothing, modern buildings, blurry, low quality, deformed hands, extra fingers, extra limbs, distorted face",
+  "voice": {
+    "engine": "kokoro",
+    "id": "bm_george",
+    "speed": 0.95,
+    "lang": "en-gb"
+  },
+  "format": "short",
+  "target_duration_s": 55,
+  "music_mood": "gentle, reverent orchestral or ambient strings; no vocals"
+}

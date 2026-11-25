@@ -1,6 +1,19 @@
-# Bible story pipeline — Step 1: images on Kaggle (free GPU)
+# Story video pipeline (free: Gemini free tier + Kaggle GPU + your laptop)
 
-## One-time setup (about 10 minutes)
+Brief in, narrated YouTube Short out. Works for any niche: each channel is a profile
+in `channels/` (`bible.json` and `horror.json` included).
+
+```
+python script.py --channel bible --passage "Genesis 37:12-24" --brief "Joseph part 2"   # 0. draft (Gemini)
+#   read scenes/<id>.json, fix it, set "status": "approved"                              #    YOU review
+python run_kaggle.py                                                                     # 1. images (Kaggle GPU)
+python voice.py                                                                          # 2. narration (laptop)
+python assemble.py                                                                       # 3. video (laptop)
+```
+
+Final video: `images/<story>/<story>.mp4`.
+
+## One-time setup
 
 1. Create an account at kaggle.com.
 2. **Verify your phone number**: Settings -> Phone verification. (GPU and internet don't work without this.)
@@ -8,69 +21,88 @@
 4. Put the token where the Kaggle tool looks for it:
    - Windows: `C:\Users\<you>\.kaggle\kaggle.json`
    - Mac/Linux: `~/.kaggle/kaggle.json` then run `chmod 600 ~/.kaggle/kaggle.json`
-5. Install the Kaggle tool: `pip install -r requirements.txt`
+5. Install everything: `pip install -r requirements.txt` (and `sudo apt install ffmpeg` if you don't have it)
 6. Check it works: `kaggle kernels list --mine` (should print without errors)
 7. **Cache the model on Kaggle (once):** `python run_kaggle.py --setup-model`
-   This runs `kaggle_cache/cache_model.py` as a CPU-only Kaggle job (no GPU hours used). It downloads
-   only the SDXL files we use (~7 GB, fp16 weights + the fp16-fix VAE, no duplicate copies) and saves
-   them as that job's output. Takes ~10-20 min. You never need to repeat it unless you change models.
+   A CPU-only Kaggle job (no GPU hours) downloads only the SDXL files we use (~7 GB) and saves
+   them as its output. ~10-20 min. Never needed again unless you change models.
+8. **Gemini key (free):** create one at https://aistudio.google.com/apikey, then
+   `export GEMINI_API_KEY=...` (add it to `~/.bashrc` to keep it). Never commit it.
 
-## Run it
-
-From this folder:
+## 0. Draft a story — `script.py`
 
 ```
-python run_kaggle.py
+python script.py --channel bible  --passage "Genesis 37:1-11" --brief "Joseph's dreams, part 1"
+python script.py --channel horror --brief "a lighthouse keeper hears knocking from below the floor"
+python script.py --channel horror --brief "retell this faithfully" --source-file my_tale.txt
 ```
 
-It refuses to start if the model cache doesn't exist yet, so no GPU time is wasted - run `--setup-model` first.
+Gemini writes `scenes/<id>.json` in the channel's narrator voice: hook first, storytelling
+narration (not verse-by-verse), one image prompt per scene with `{CHARACTER}` placeholders,
+and a `characters` block. Length comes from the channel's `target_duration_s`.
 
-What happens:
-1. Every story in `scenes/` is uploaded to a private Kaggle dataset.
-2. The GPU job (`kaggle_sd/generate.py`) starts on Kaggle.
-3. The script checks every 30 s until it finishes (~1-2 min to load the cached model, then ~30 s per image).
-4. Images download to `images/<story>/scene_01.png ...`, with `story.json` (the narration) next to them.
+- `--passage` fetches the KJV text from bible-api.com; the draft must retell it faithfully, and
+  any quoted words are checked word for word against it (the Bible channel allows one quote).
+- Bad drafts (unknown characters, misquotes, too many quotes...) are sent back to Gemini with the
+  problems listed, up to 3 tries.
+- Options: `--id my_story`, `--scenes 6`, `--model <name>` (`--list-models` shows yours).
 
-Kaggle shuts the machine down when the job ends - GPU hours only count while it runs.
+**Review step (required):** open the file, check every fact against the source, edit freely,
+then change `"status": "draft"` to `"status": "approved"`. `script.py` won't overwrite an approved
+story without `--force`.
 
-The image job attaches the cache automatically and runs Hugging Face in offline mode, so it never downloads the model.
-If the cache is somehow missing inside the job, it prints a WARNING and falls back to downloading.
+## 1. Images — `run_kaggle.py`
 
-If the job finished but the download failed: `python run_kaggle.py --download`
+```
+python run_kaggle.py                 # every approved story
+python run_kaggle.py joseph_part1    # just these (must be approved)
+python run_kaggle.py --download      # re-download the last finished run
+```
 
-## Adding a story
+- Only `"status": "approved"` stories are uploaded; drafts are listed as skipped. With nothing
+  approved, nothing is sent to Kaggle. Approved stories are validated first.
+- The channel profiles go up with them, so each story gets its channel's look (`style`/`negative`).
+- Refuses to start if the model cache doesn't exist (run `--setup-model` first).
+- ~1 min to load the model, then ~30 s per image. Images land in `images/<story>/`.
 
-Copy `scenes/joseph_part1.json`, rename it, and edit it.
-- `characters`: describe each person once; use `{NAME}` in prompts so the wording is identical every scene.
-- `format`: `"short"` (vertical 9:16) or `"long"` (horizontal 16:9).
+## 2. Narration — `voice.py`  ·  3. Video — `assemble.py`
+
+```
+python voice.py [story]              # -> images/<story>/audio/scene_XX.wav
+python assemble.py [story]           # -> images/<story>/<story>.mp4
+```
+
+- Voice and speed come from the channel profile (`voice.py --voices` lists Kokoro voices;
+  `--voice am_michael` to try one). First run downloads the voice model (~350 MB) once.
+- Narration is cached and read from `scenes/`, so fixing a typo doesn't need a GPU re-run.
+- Each image stays up exactly as long as its narration, with a slow zoom and burned-in subtitles.
+- **Music:** put royalty-free tracks in `music/<channel>/` (or `music/`); the first one is mixed
+  quietly under the voice. `--music file.mp3` / `--no-music` to override.
+
+## Story file
+
+```json
+{
+  "story": "joseph_part1", "channel": "bible", "title": "...", "status": "approved",
+  "source": {"passage": "Genesis 37", "translation": "KJV"},
+  "characters": {"JOSEPH": "a beardless 17-year-old ... robe of many colours"},
+  "scenes": [
+    {"id": 1, "refs": ["Genesis 37:3"], "narration": "...",
+     "quote": {"text": "a coat of many colours", "ref": "Genesis 37:3", "translation": "KJV"},
+     "image_prompt": "{JOSEPH} holding up a beautiful new coat ...", "seed": 555}
+  ]
+}
+```
+
+- Describe each person once in `characters`; use `{NAME}` in prompts so they look the same every scene.
+  Keep to one main character per image — SDXL blends people together.
 - Add `"seed": 555` to a scene to re-roll just that image.
-- Put several story files in `scenes/` to batch them in one GPU run.
+- A story can override its channel's `style`, `negative`, `format`, `voice`, `speed`.
+- Direct quotes must be public-domain (KJV/ASV/WEB for Bible), in quotation marks, and listed in `quote`.
 
-## Changing the look
+## New channel / niche
 
-Edit `STYLE` at the top of `kaggle_sd/generate.py` once, then leave it alone so the channel stays consistent.
-
----
-
-# Step 2 & 3: narration and video (on your laptop)
-
-```
-python voice.py                  # narration for every story in images/
-python assemble.py               # -> images/<story>/<story>.mp4
-python voice.py joseph_part1     # (or just one story)
-```
-
-`voice.py` speaks each scene's `narration` with Kokoro TTS (CPU) into `images/<story>/audio/`.
-`assemble.py` shows each image for exactly that long with a slow zoom, burns in subtitles, and
-writes `images/<story>/<story>.mp4` (1080x1920 for `"short"`, 1920x1080 for `"long"`).
-
-- First run downloads the voice model (~350 MB) into `models/` - once.
-- Narration is cached; only scenes whose text or voice changed are re-spoken.
-- Narration is read from `scenes/<story>.json`, so fixing a typo doesn't need a GPU re-run.
-- **Voice:** default `bm_george` (calm British male). `python voice.py --voices` lists others;
-  `--voice am_michael` to try one, or set `"voice"` / `"speed"` in the story JSON.
-- **Music:** drop an mp3 in `music/` and it's mixed quietly under the voice automatically
-  (or `--music file.mp3`, `--no-music`). Royalty-free only (e.g. YouTube Audio Library).
-- Narration must be exact KJV/ASV/WEB text (see CLAUDE.md).
-
-Full flow for a new story: `scenes/<story>.json` -> `python run_kaggle.py` -> `python voice.py` -> `python assemble.py`.
+Copy `channels/horror.json` to `channels/<name>.json` and edit: narrator persona and tone, story
+rules, quote policy, image `style` + `negative`, voice, format, target length, music mood.
+Then `python script.py --channel <name> --brief "..."`. No code changes needed.
+Pick the `style` once and leave it — it's the channel's visual brand.

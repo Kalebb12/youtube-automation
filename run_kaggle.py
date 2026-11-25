@@ -1,18 +1,23 @@
 """
-Runs ON YOUR LAPTOP. Uploads stories in ./scenes to Kaggle, starts the GPU job,
-waits for it to finish, and downloads the images into ./images.
+Runs ON YOUR LAPTOP. Uploads APPROVED stories in ./scenes (plus the channel profiles
+in ./channels) to Kaggle, starts the GPU job, waits for it, and downloads the images.
 
 Usage:
     python run_kaggle.py --setup-model   # ONE TIME: cache the SDXL model on Kaggle (~7 GB)
-    python run_kaggle.py                 # upload scenes, run, download
+    python run_kaggle.py                 # all approved stories: upload, run, download
+    python run_kaggle.py joseph_part1    # only these (must be approved)
     python run_kaggle.py --download      # just download the latest finished run
+
+Stories with "status": "draft" are skipped - review them and set "status": "approved".
 """
-import argparse, json, os, re, shutil, subprocess, sys, time
+import argparse, glob, json, os, re, shutil, subprocess, sys, time
+from common import CHANNELS_DIR, validate_story
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SCENES_DIR = os.path.join(HERE, "scenes")
 KERNEL_DIR = os.path.join(HERE, "kaggle_sd")
 IMAGES_DIR = os.path.join(HERE, "images")
+UPLOAD_DIR = os.path.join(HERE, ".kaggle_upload")   # rebuilt each run; what the dataset contains
 DATASET_SLUG = "bible-scenes"
 KERNEL_SLUG = "bible-scene-generator"
 CACHE_DIR = os.path.join(HERE, "kaggle_cache")
@@ -55,10 +60,49 @@ def username():
     sys.exit("Kaggle username not found: put kaggle.json in ~/.kaggle/ (see README)")
 
 
+def stage_upload(names):
+    """Copy approved (and valid) stories + all channel profiles into UPLOAD_DIR.
+    Profiles are flattened to channel__<name>.json because the dataset upload can't
+    keep sub-folders as folders. Returns the story ids staged."""
+    approved, skipped, bad = [], [], []
+    for path in sorted(glob.glob(os.path.join(SCENES_DIR, "*.json"))):
+        sid = os.path.splitext(os.path.basename(path))[0]
+        if sid == "dataset-metadata" or (names and sid not in names):
+            continue
+        story = json.load(open(path))
+        if story.get("status") != "approved":
+            skipped.append(sid)
+            continue
+        errs = validate_story(story)
+        if errs:
+            bad.append((sid, errs))
+        else:
+            approved.append((sid, path))
+    if skipped:
+        print(f"Skipping drafts (not approved): {', '.join(skipped)}")
+    if bad:
+        sys.exit("These approved stories are invalid - fix them first:\n" + "\n".join(
+            f"  {sid}: " + "; ".join(e) for sid, e in bad))
+    missing = sorted(set(names or []) - {sid for sid, _ in approved} - set(skipped))
+    if missing:
+        sys.exit(f"No such story in scenes/: {', '.join(missing)}")
+    if not approved:
+        sys.exit("No approved stories to generate - nothing sent to the GPU.\n"
+                 "Review a draft in scenes/, set \"status\": \"approved\", and run again.")
+    shutil.rmtree(UPLOAD_DIR, ignore_errors=True)
+    os.makedirs(UPLOAD_DIR)
+    for sid, path in approved:
+        shutil.copy(path, os.path.join(UPLOAD_DIR, f"{sid}.json"))
+    for path in glob.glob(os.path.join(CHANNELS_DIR, "*.json")):
+        shutil.copy(path, os.path.join(UPLOAD_DIR, "channel__" + os.path.basename(path)))
+    return [sid for sid, _ in approved]
+
+
 def write_metadata(user):
+    os.makedirs(UPLOAD_DIR, exist_ok=True)
     json.dump({"title": DATASET_SLUG, "id": f"{user}/{DATASET_SLUG}",
                "licenses": [{"name": "CC0-1.0"}]},
-              open(os.path.join(SCENES_DIR, "dataset-metadata.json"), "w"), indent=2)
+              open(os.path.join(UPLOAD_DIR, "dataset-metadata.json"), "w"), indent=2)
     json.dump({"id": f"{user}/{KERNEL_SLUG}", "title": KERNEL_SLUG,
                "code_file": "generate.py", "language": "python", "kernel_type": "script",
                "is_private": True, "enable_gpu": True, "enable_internet": True,
@@ -116,10 +160,10 @@ def upload_scenes(user):
     exists = subprocess.run([KAGGLE, "datasets", "status", ref],
                             capture_output=True, text=True).returncode == 0
     if exists:
-        sh(KAGGLE, "datasets", "version", "-p", SCENES_DIR,
-           "-m", time.strftime("scenes %Y-%m-%d %H:%M"), "--dir-mode", "zip")
+        sh(KAGGLE, "datasets", "version", "-p", UPLOAD_DIR,
+           "-m", time.strftime("scenes %Y-%m-%d %H:%M"))
     else:
-        sh(KAGGLE, "datasets", "create", "-p", SCENES_DIR, "--dir-mode", "zip")
+        sh(KAGGLE, "datasets", "create", "-p", UPLOAD_DIR)
     print("Waiting for Kaggle to process the dataset...")
     for _ in range(40):
         out = sh(KAGGLE, "datasets", "status", ref, check=False).lower()
@@ -152,21 +196,22 @@ def download(user):
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
+    ap.add_argument("stories", nargs="*", help="only these approved stories (default: all approved)")
     ap.add_argument("--download", action="store_true", help="only download the last run")
     ap.add_argument("--setup-model", action="store_true",
                     help="one-time: download the SDXL model on Kaggle and save it as a cache")
     args = ap.parse_args()
 
     user = username()
-    write_metadata(user)
     if args.setup_model:
+        write_metadata(user)
         setup_model(user)
         sys.exit(0)
     if not args.download:
+        stories = stage_upload(args.stories)      # refuses before touching Kaggle if none approved
+        write_metadata(user)
+        print(f"Stories to generate: {', '.join(stories)}")
         require_cache(user)
-        stories = [f for f in os.listdir(SCENES_DIR)
-                   if f.endswith(".json") and f != "dataset-metadata.json"]
-        print(f"Stories to generate: {stories}")
         upload_scenes(user)
         sh(KAGGLE, "kernels", "push", "-p", KERNEL_DIR)
         print("GPU job started (model loads from the cache, ~1-2 min).")

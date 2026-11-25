@@ -10,16 +10,16 @@ Usage:
     python voice.py --voice am_michael  # override the voice
     python voice.py --voices            # list voices
 
+Voice engine, voice id and speed come from the story's channel profile
+(channels/<channel>.json -> "voice"); a story's own "voice" / "speed" override it.
 Cached: a scene is only re-spoken when its text, voice or speed changes.
-Story options: "voice": "bm_george", "speed": 0.95
 """
 import argparse, hashlib, os, sys, urllib.request
-from common import HERE, duration, load_story, story_dirs
+from common import HERE, duration, load_story, story_dirs, story_voice
 
 MODELS_DIR = os.path.join(HERE, "models")
 MODEL_URL = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/"
 MODEL_FILES = ["kokoro-v1.0.onnx", "voices-v1.0.bin"]
-DEFAULT_VOICE, DEFAULT_SPEED = "bm_george", 0.95   # calm British male storyteller
 
 _tts = None
 def tts():
@@ -37,14 +37,13 @@ def tts():
     return _tts
 
 
-def speak(text, voice, speed, out_wav):
+def speak(text, voice, speed, lang, out_wav):
     """Returns True if it (re)generated the file, False if the cached one was reused."""
-    key = hashlib.sha1(f"{voice}|{speed}|{text}".encode()).hexdigest()[:12]
+    key = hashlib.sha1(f"{voice}|{speed}|{lang}|{text}".encode()).hexdigest()[:12]
     stamp = out_wav + ".key"
     if os.path.exists(out_wav) and os.path.exists(stamp) and open(stamp).read() == key:
         return False
     import soundfile as sf
-    lang = "en-gb" if voice.startswith("b") else "en-us"
     samples, rate = tts().create(text, voice=voice, speed=speed, lang=lang)
     sf.write(out_wav, samples, rate)
     open(stamp, "w").write(key)
@@ -52,22 +51,32 @@ def speak(text, voice, speed, out_wav):
 
 
 def voice_story(story_dir, voice_override=None):
-    story = load_story(story_dir)
-    voice = voice_override or story.get("voice", DEFAULT_VOICE)
-    speed = float(story.get("speed", DEFAULT_SPEED))
+    story, channel = load_story(story_dir)
+    if voice_override:
+        story = {**story, "voice": voice_override}
+    engine, voice, speed, lang = story_voice(story, channel)
+    if engine != "kokoro":
+        sys.exit(f"Voice engine '{engine}' isn't supported yet (only 'kokoro')")
     audio_dir = os.path.join(story_dir, "audio")
     os.makedirs(audio_dir, exist_ok=True)
-    print(f"\n=== {os.path.basename(story_dir)}: voice {voice}, speed {speed} ===")
+    print(f"\n=== {os.path.basename(story_dir)} [{channel['name']}]: voice {voice} ({lang}), speed {speed} ===")
+    total = 0.0
     for s in story["scenes"]:
         wav = os.path.join(audio_dir, f"scene_{s['id']:02d}.wav")
-        made = speak(s["narration"], voice, speed, wav)
-        print(f"  scene {s['id']:02d}: {duration(wav):4.1f}s {'(new)' if made else '(cached)'}")
+        made = speak(s["narration"], voice, speed, lang, wav)
+        d = duration(wav)
+        total += d
+        print(f"  scene {s['id']:02d}: {d:4.1f}s {'(new)' if made else '(cached)'}")
+    target = channel.get("target_duration_s")
+    print(f"  total narration {total:.1f}s" + (f" (channel target {target}s)" if target else ""))
+    if target and total > target * 1.15:
+        print(f"  WARNING: {total - target:.0f}s over target - consider trimming the narration")
 
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("stories", nargs="*", help="story names (default: all in images/)")
-    ap.add_argument("--voice", help=f"Kokoro voice (default {DEFAULT_VOICE}, or the story's \"voice\")")
+    ap.add_argument("--voice", help="Kokoro voice id (default: from the channel profile)")
     ap.add_argument("--voices", action="store_true", help="list available voices and exit")
     args = ap.parse_args()
     if args.voices:

@@ -1,9 +1,12 @@
 {
   "story": "joseph_part1",
+  "channel": "bible",
   "title": "Joseph and His Brothers (Part 1)",
-  "passage": "Genesis 37",
-  "translation": "KJV",
-  "format": "short",
+  "status": "draft",
+  "source": {
+    "passage": "Genesis 37",
+    "translation": "KJV"
+  },
   "characters": {
     "JOSEPH": "a beardless 17-year-old teenage boy with a smooth youthful face, short black curly hair, wearing a vibrant robe of many colours",
     "BROTHERS": "older bearded brothers in plain brown shepherd robes",
@@ -13,26 +16,41 @@
   "scenes": [
     {
       "id": 1,
-      "ref": "Genesis 37:3",
-      "narration": "Now Israel loved Joseph more than all his children, because he was the son of his old age: and he made him a coat of many colours.",
-      "image_prompt": "{JOSEPH} holding up a beautiful new coat of many colours with delight, smiling, inside a tent, warm lamp light, his elderly father softly blurred in the background"
+      "refs": [
+        "Genesis 37:3"
+      ],
+      "narration": "One gift tore a family apart. Israel loved his son Joseph more than all his other children, because Joseph was the son of his old age. And he gave him something none of the others had: “a coat of many colours.”",
+      "image_prompt": "{JOSEPH} holding up a beautiful new coat of many colours with delight, smiling, inside a tent, warm lamp light, his elderly father softly blurred in the background",
+      "quote": {
+        "text": "a coat of many colours",
+        "ref": "Genesis 37:3",
+        "translation": "KJV"
+      }
     },
     {
       "id": 2,
-      "ref": "Genesis 37:4",
-      "narration": "And when his brethren saw that their father loved him more than all his brethren, they hated him, and could not speak peaceably unto him.",
+      "refs": [
+        "Genesis 37:4"
+      ],
+      "narration": "His brothers saw it. Their father loved Joseph more than any of them. And they hated him for it, so much that they could not speak a peaceful word to him.",
       "image_prompt": "close-up of {BROTHERS} faces scowling with jealousy, side-eyeing, shepherd's field behind them, harsh afternoon light"
     },
     {
       "id": 3,
-      "ref": "Genesis 37:5, 7",
-      "narration": "And Joseph dreamed a dream, and he told it his brethren: and they hated him yet the more. For, behold, we were binding sheaves in the field, and, lo, my sheaf arose, and also stood upright; and, behold, your sheaves stood round about, and made obeisance to my sheaf.",
+      "refs": [
+        "Genesis 37:5",
+        "Genesis 37:7"
+      ],
+      "narration": "Then Joseph had a dream, and he told his brothers. They were binding sheaves of grain in the field, he said, when his sheaf rose and stood upright, and all their sheaves gathered around it and bowed down to it. And they hated him even more.",
       "image_prompt": "{JOSEPH} sleeping peacefully on a woven mat under a starry night sky, above him a glowing dreamlike vision of golden wheat sheaves bowing in a circle, dreamy light"
     },
     {
       "id": 4,
-      "ref": "Genesis 37:23-24",
-      "narration": "And it came to pass, when Joseph was come unto his brethren, that they stript Joseph out of his coat, his coat of many colours that was on him; And they took him, and cast him into a pit: and the pit was empty, there was no water in it.",
+      "refs": [
+        "Genesis 37:23",
+        "Genesis 37:24"
+      ],
+      "narration": "Later, when Joseph came to his brothers, they seized him. They stripped him of his coat, the coat of many colours. Then they threw him into a pit. The pit was empty. There was no water in it.",
       "image_prompt": "view from above looking down into a deep dry stone pit in the desert, {JOSEPH_STRIPPED} alone at the bottom looking up, a rope hanging down, dramatic dusk light"
     }
   ]

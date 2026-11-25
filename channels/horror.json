@@ -1,0 +1,31 @@
+{
+  "name": "horror",
+  "display_name": "Midnight Tales",
+  "language": "en",
+  "narrator": {
+    "persona": "a low, calm late-night narrator telling a story as if it really happened to someone",
+    "tone": "quiet, slow-building dread; plain conversational English; short sentences; restraint over shock"
+  },
+  "story_rules": [
+    "Original fiction unless a source is given; when retelling a source, keep its events and ending.",
+    "Open with a hook in the first sentence that makes the viewer need to know what happens.",
+    "Build dread through small wrong details; the scariest thing is implied, not shown.",
+    "PG-13: no gore, sexual content, self-harm, or harm to children or animals described in detail.",
+    "Never use real people, real crimes, real victims or real places presented as true events.",
+    "No copyrighted characters, creatures or settings.",
+    "End on a twist or an unsettling final image."
+  ],
+  "max_quotes": 0,
+  "quote_translations": [],
+  "style": "dark cinematic horror illustration, painterly digital art, muted desaturated colours, deep shadows, cold moonlight, fog, film grain, eerie atmosphere, detailed",
+  "negative": "text, watermark, logo, signature, gore, blood, cartoon, cute, bright cheerful colours, blurry, low quality, deformed hands, extra fingers, extra limbs, distorted face",
+  "voice": {
+    "engine": "kokoro",
+    "id": "bm_lewis",
+    "speed": 0.9,
+    "lang": "en-gb"
+  },
+  "format": "short",
+  "target_duration_s": 55,
+  "music_mood": "dark ambient drone, low strings, sparse piano; no jump-scare stings"
+}

@@ -6,7 +6,8 @@ Writes  images/<story>/<story>.mp4
 
 Each scene is shown for exactly as long as its narration, with a slow zoom
 (alternating in/out). Subtitles are timed from the narration lengths and burned in.
-Optional background music is mixed quietly under the voice.
+Format comes from the channel profile (story "format" overrides). Background music,
+if any, is taken from music/<channel>/ first, then music/, and mixed quietly under the voice.
 
 Usage:
     python assemble.py                      # every story in images/
@@ -15,7 +16,7 @@ Usage:
     python assemble.py --no-music
 """
 import argparse, glob, os, shutil, sys, textwrap
-from common import HERE, duration, load_story, run, story_dirs
+from common import HERE, duration, load_story, run, story_dirs, story_setting
 
 MUSIC_DIR = os.path.join(HERE, "music")
 
@@ -88,15 +89,31 @@ def scene_clip(img, wav, length, w, h, idx, out):
          "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "2", out])
 
 
-def assemble_story(story_dir, music):
-    story = load_story(story_dir)
+def pick_music(channel_name):
+    """First audio file in music/<channel>/, else in music/, else None."""
+    for d in (os.path.join(MUSIC_DIR, channel_name), MUSIC_DIR):
+        files = sorted(f for f in glob.glob(os.path.join(d, "*"))
+                       if f.lower().endswith((".mp3", ".wav", ".m4a", ".ogg")))
+        if files:
+            return files[0]
+    return None
+
+
+def assemble_story(story_dir, music, use_music=True):
+    story, channel = load_story(story_dir)
     sid = os.path.basename(story_dir)
-    fmt = story.get("format", "short")
+    fmt = story_setting(story, channel, "format", "short")
+    if use_music and not music:
+        music = pick_music(channel["name"])
+        if not music and channel.get("music_mood"):
+            print(f"  (no music: add a track to music/{channel['name']}/ - mood: {channel['music_mood']})")
+    if music:
+        print(f"  music: {music}")
     w, h = SIZES[fmt]
     work = os.path.join(story_dir, ".work")
     os.makedirs(work, exist_ok=True)
 
-    print(f"\n=== {sid}: {len(story['scenes'])} scenes, {fmt} {w}x{h} ===")
+    print(f"\n=== {sid} [{channel['name']}]: {len(story['scenes'])} scenes, {fmt} {w}x{h} ===")
     clips, events, t = [], [], 0.0
     for i, s in enumerate(story["scenes"]):
         img = os.path.join(story_dir, f"scene_{s['id']:02d}.png")
@@ -144,16 +161,9 @@ def assemble_story(story_dir, music):
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("stories", nargs="*", help="story names (default: all in images/)")
-    ap.add_argument("--music", help="background music file (default: first file in music/, if any)")
+    ap.add_argument("--music", help="background music file (default: music/<channel>/ then music/)")
     ap.add_argument("--no-music", action="store_true")
     args = ap.parse_args()
 
-    music = None
-    if not args.no_music:
-        music = args.music or next(iter(sorted(
-            f for f in glob.glob(os.path.join(MUSIC_DIR, "*"))
-            if f.lower().endswith((".mp3", ".wav", ".m4a", ".ogg")))), None)
-        if music:
-            print(f"Background music: {music}")
     for d in story_dirs(args.stories):
-        assemble_story(d, music)
+        assemble_story(d, args.music, use_music=not args.no_music)
