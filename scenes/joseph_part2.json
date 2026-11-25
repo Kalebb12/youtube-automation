@@ -1,0 +1,84 @@
+{
+  "story": "joseph_part2",
+  "channel": "bible",
+  "title": "Joseph and His Brothers (Part 2): The Brothers' Plot",
+  "status": "approved",
+  "source": {
+    "brief": "Joseph and His Brothers (Part 2): the brothers see him coming, plot to kill him, Reuben intervenes, and they throw him into the pit",
+    "passage": "Genesis 37:12-24",
+    "translation": "KJV"
+  },
+  "characters": {
+    "JOSEPH": "a beardless 17-year-old teenage boy with a smooth youthful face, short black curly hair, wearing a vibrant robe of many colours",
+    "BROTHERS": "older bearded brothers in plain brown shepherd robes",
+    "JACOB": "an old man with a long white beard and a dark blue robe",
+    "JOSEPH_STRIPPED": "a frightened beardless teenage boy with short black curly hair in a plain torn tunic",
+    "REUBEN": "a tall man in his thirties with a full dark brown beard and furrowed brow, wearing a plain brown shepherd robe with a dark red sash"
+  },
+  "scenes": [
+    {
+      "id": 1,
+      "refs": [
+        "Genesis 37:18"
+      ],
+      "narration": "Joseph's brothers saw him coming from far off, and they plotted to kill him.",
+      "image_prompt": "{BROTHERS} huddled together on a rocky hillside, glaring toward a tiny distant figure approaching across dry pastureland, low angle from behind the group, harsh afternoon sun casting long shadows"
+    },
+    {
+      "id": 2,
+      "refs": [
+        "Genesis 37:12",
+        "Genesis 37:13",
+        "Genesis 37:14"
+      ],
+      "narration": "Israel had sent Joseph from Hebron to check on his brothers and the flocks.",
+      "image_prompt": "{JACOB} standing at the doorway of a tent in a green valley, one hand raised as he sends someone off on a journey, medium shot, soft morning light, sheep grazing in the background"
+    },
+    {
+      "id": 3,
+      "refs": [
+        "Genesis 37:14",
+        "Genesis 37:15",
+        "Genesis 37:16",
+        "Genesis 37:17"
+      ],
+      "narration": "At Shechem, a man found him wandering in a field. Joseph asked for his brothers. They'd gone to Dothan, the man said.",
+      "image_prompt": "{JOSEPH} wandering alone through a wide open field of tall dry grass, looking around searchingly, a lone stranger standing at the field's edge in the distance, wide shot, hazy midday light"
+    },
+    {
+      "id": 4,
+      "refs": [
+        "Genesis 37:17",
+        "Genesis 37:18",
+        "Genesis 37:19",
+        "Genesis 37:20"
+      ],
+      "narration": "In Dothan, the brothers saw him and said, “Behold, this dreamer cometh.” Kill him, they said. Throw him in a pit. Say a wild beast ate him.",
+      "image_prompt": "{BROTHERS} leaning close together in a tense whisper beside grazing sheep, faces hard and scheming, close-up group shot, dusty wilderness behind them, dramatic late afternoon side light",
+      "quote": {
+        "text": "Behold, this dreamer cometh.",
+        "ref": "Genesis 37:19",
+        "translation": "KJV"
+      }
+    },
+    {
+      "id": 5,
+      "refs": [
+        "Genesis 37:21",
+        "Genesis 37:22"
+      ],
+      "narration": "Reuben heard. Don't kill him, he said. Shed no blood; just throw him in this pit. He meant to bring Joseph back to their father.",
+      "image_prompt": "{REUBEN} standing with both hands raised in protest, pointing toward a dark stone-lined pit in the dusty wilderness, medium shot at eye level, warm golden evening light"
+    },
+    {
+      "id": 6,
+      "refs": [
+        "Genesis 37:23",
+        "Genesis 37:24"
+      ],
+      "narration": "When Joseph arrived, they stripped off his coat of many colours and threw him in the pit. It was empty. There was no water in it.",
+      "image_prompt": "{JOSEPH_STRIPPED} sitting alone at the bottom of a deep dry stone pit, looking up in fear toward a circle of bright sky far above, high angle looking down into the pit, shaft of light falling on dusty empty ground"
+    }
+  ],
+  "previous": "joseph_part1"
+}

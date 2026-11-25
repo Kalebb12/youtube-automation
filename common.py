@@ -13,6 +13,22 @@ PLACEHOLDER = re.compile(r"\{([^{}]*)\}")
 STORY_ID = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
 
 
+def load_dotenv(path=os.path.join(HERE, ".env")):
+    """Read KEY=VALUE lines from .env into os.environ (never overrides what's already set).
+    .env is gitignored - keys live there, never in code."""
+    if not os.path.exists(path):
+        return
+    for line in open(path, encoding="utf-8"):
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, val = line.removeprefix("export ").split("=", 1)
+        key, val = key.strip(), val.strip()
+        if len(val) >= 2 and val[0] == val[-1] and val[0] in "\"'":
+            val = val[1:-1]
+        os.environ.setdefault(key, val)
+
+
 def run(cmd):
     r = subprocess.run(cmd, capture_output=True, text=True)
     if r.returncode != 0:

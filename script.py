@@ -1,13 +1,18 @@
 """
-Runs ON YOUR LAPTOP. Stage 0: drafts a story (scenes/<id>.json) with the Gemini API free tier.
+Runs ON YOUR LAPTOP. Stage 0: drafts a story (scenes/<id>.json) with an LLM:
+Gemini (free tier, default) or Claude (paid, Anthropic API).
 
 Usage:
     python script.py --channel bible  --passage "Genesis 37:1-11" --brief "Joseph's dreams, part 1"
     python script.py --channel horror --brief "a lighthouse keeper hears knocking from below"
     python script.py --channel horror --brief "retell this" --source-file stories/tale.txt
-    python script.py --list-models
+    python script.py --provider claude --channel bible --passage "Genesis 37:12-24" --brief "Joseph part 2"
+    python script.py --list-models [--provider claude]
 
-Needs GEMINI_API_KEY (free: https://aistudio.google.com/apikey).
+Keys are read from the environment or from .env (gitignored):
+  gemini: GEMINI_API_KEY (free: https://aistudio.google.com/apikey)
+  claude: ANTHROPIC_API_KEY, or an `ant auth login` profile (no key needed)
+Default provider: LLM_PROVIDER from env/.env, else gemini.
 The narrator voice, rules, quote policy and target length all come from channels/<channel>.json.
 --passage fetches the text (KJV by default) from bible-api.com and the model must retell it
 faithfully; any quoted words are checked word for word against that text.
@@ -16,10 +21,17 @@ The result is written with "status": "draft". Read it, fix anything, then set
 "status": "approved" - only approved stories are sent to the GPU.
 Refuses to overwrite an approved story unless you pass --force.
 """
-import argparse, json, os, re, sys, urllib.parse, urllib.request
-from common import SCENES_DIR, channel_names, load_channel, story_setting, validate_story
+import argparse, json, os, re, sys, time, urllib.parse, urllib.request
+from common import SCENES_DIR, channel_names, load_channel, load_dotenv, story_setting, validate_story
 
-DEFAULT_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
+load_dotenv()
+PROVIDERS = ("gemini", "claude")
+DEFAULT_PROVIDER = os.environ.get("LLM_PROVIDER", "gemini").lower()
+DEFAULT_MODELS = {"gemini": os.environ.get("GEMINI_MODEL", "gemini-3.8-flash"),
+                  "claude": os.environ.get("CLAUDE_MODEL", "claude-opus-5-5")}
+# Claude models that accept server-side refusal fallbacks (fallbacks="default")
+CLAUDE_FALLBACK_MODELS = {"claude-opus-5-5", "claude-opus-5", "claude-sonnet-5-5",
+                          "claude-fable-5-2", "claude-fable-5-1"}
 WORDS_PER_SECOND = 2.6        # measured on Kokoro at speed ~0.95
 SECONDS_PER_SCENE = 9         # ~one image every 9 s keeps a Short moving
 MAX_ATTEMPTS = 3
@@ -50,6 +62,21 @@ SCHEMA = {
 }
 
 
+def _strict(schema):
+    """Copy of SCHEMA for Claude structured outputs: every object closed (additionalProperties false)."""
+    if isinstance(schema, dict):
+        out = {k: _strict(v) for k, v in schema.items()}
+        if out.get("type") == "object":
+            out["additionalProperties"] = False
+        return out
+    if isinstance(schema, list):
+        return [_strict(v) for v in schema]
+    return schema
+
+
+CLAUDE_SCHEMA = _strict(SCHEMA)
+
+
 def fetch_passage(passage, translation):
     url = (f"https://bible-api.com/{urllib.parse.quote(passage)}"
            f"?translation={urllib.parse.quote(translation)}")
@@ -64,7 +91,8 @@ def fetch_passage(passage, translation):
     return data.get("reference", passage), "\n".join(lines)
 
 
-def build_prompt(channel, brief, source_label, source_text, n_scenes, word_budget, translation):
+def build_prompt(channel, brief, source_label, source_text, n_scenes, word_budget, translation,
+                 previous=None):
     n = channel["narrator"]
     rules = "\n".join(f"- {r}" for r in channel["story_rules"])
     max_q = int(channel.get("max_quotes", 0))
@@ -101,6 +129,15 @@ FORMAT RULES:
   Do NOT include art-style words (the channel adds its own style), and no text or captions in the image.
 - title: short, specific, curiosity-driven, no clickbait lies."""
     user = f"BRIEF: {brief}\n"
+    if previous:
+        chars = "\n".join(f"- {k}: {v}" for k, v in previous["characters"].items())
+        recap = " ".join(s["narration"] for s in previous["scenes"])
+        user += (f"\nTHIS IS THE NEXT EPISODE of a series. Previous episode: \"{previous['title']}\".\n"
+                 f"Its narration (for continuity only - do not repeat it, and do not retell events it "
+                 f"already covered unless the SOURCE requires it):\n<<<\n{recap}\n>>>\n"
+                 f"\nSERIES CHARACTERS - reuse these for anyone who appears again: same NAME, description "
+                 f"copied exactly, word for word. Only add new entries for people not listed here.\n"
+                 f"{chars}\n")
     if source_text:
         user += (f"\nSOURCE ({source_label}) - retell this faithfully; it is the only source of facts:\n"
                  f"<<<\n{source_text}\n>>>\n")
@@ -116,34 +153,110 @@ def call_gemini(model, system, user):
     if not os.environ.get("GEMINI_API_KEY"):
         sys.exit("GEMINI_API_KEY is not set. Get a free key at https://aistudio.google.com/apikey, then:\n"
                  "  export GEMINI_API_KEY=...")
-    client = genai.Client()
-    try:
-        r = client.models.generate_content(
-            model=model, contents=user,
-            config=types.GenerateContentConfig(
-                system_instruction=system, temperature=0.7,
-                response_mime_type="application/json", response_json_schema=SCHEMA))
-    except Exception as e:
-        msg = str(e)
-        hint = ""
-        if "404" in msg or "not found" in msg.lower():
-            hint = "\nThat model may be retired - run python script.py --list-models and pass --model."
-        elif "429" in msg or "quota" in msg.lower():
-            hint = "\nFree-tier rate limit hit - wait a minute and try again."
-        sys.exit(f"Gemini API error: {msg[:800]}{hint}")
+    from google.genai import errors
+    client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
+    for wait in (10, 30, 60, None):      # free tier: busy (503) / rate-limited (429) is common
+        try:
+            r = client.models.generate_content(
+                model=model, contents=user,
+                config=types.GenerateContentConfig(
+                    system_instruction=system, temperature=0.7,
+                    response_mime_type="application/json", response_json_schema=SCHEMA))
+            break
+        except errors.APIError as e:
+            if e.code in (429, 500, 503) and wait:
+                print(f"  Gemini busy ({e.code}) - retrying in {wait}s...")
+                time.sleep(wait)
+                continue
+            hint = ""
+            if e.code == 404:
+                hint = "\nThat model may be retired - run python script.py --list-models and pass --model."
+            elif e.code == 429:
+                hint = "\nFree-tier rate limit hit - wait a few minutes, or try --provider claude."
+            elif e.code in (500, 503):
+                hint = "\nGemini is overloaded - try later, another --model, or --provider claude."
+            sys.exit(f"Gemini API error: {str(e)[:800]}{hint}")
     try:
         return json.loads(r.text)
     except (TypeError, ValueError):
         return {"_raw": r.text}
 
 
-def to_story(raw, story_id, channel, source):
+def call_claude(model, system, user):
+    try:
+        import anthropic
+    except ImportError:
+        sys.exit("anthropic isn't installed: pip install -r requirements.txt")
+    # Zero-arg client: ANTHROPIC_API_KEY (env or .env), else the `ant auth login` profile
+    client = anthropic.Anthropic()
+    kwargs = dict(
+        model=model, max_tokens=16000, system=system,
+        messages=[{"role": "user", "content": user}],
+        output_config={"effort": "high",
+                       "format": {"type": "json_schema", "schema": CLAUDE_SCHEMA}},
+    )
+    if model in CLAUDE_FALLBACK_MODELS:
+        # Server-side fallback: if a safety classifier declines, the API retries on a fallback model
+        kwargs.update(betas=["server-side-fallback-2026-07-01"], fallbacks="default")
+    try:
+        r = client.beta.messages.create(**kwargs)
+    except anthropic.AuthenticationError:
+        sys.exit("Claude: no valid credentials. Run `ant auth login`, or put ANTHROPIC_API_KEY=... in .env")
+    except anthropic.PermissionDeniedError as e:
+        sys.exit(f"Claude: this key/profile can't use {model}: {e.message}")
+    except anthropic.NotFoundError:
+        sys.exit(f"Claude: model '{model}' not found - python script.py --provider claude --list-models")
+    except anthropic.RateLimitError:
+        sys.exit("Claude: rate limited - wait a minute and try again.")
+    except anthropic.BadRequestError as e:
+        sys.exit(f"Claude: request rejected: {e.message}")
+    except anthropic.APIStatusError as e:
+        sys.exit(f"Claude API error {e.status_code}: {e.message} (request id {e.request_id})")
+    except anthropic.APIConnectionError:
+        sys.exit("Claude: network error - check your internet connection.")
+    if r.stop_reason == "refusal":
+        why = getattr(r.stop_details, "category", None) if r.stop_details else None
+        sys.exit(f"Claude declined this request (category: {why}). Rephrase the brief.")
+    if r.stop_reason == "max_tokens":
+        return {"_raw": "response cut off at max_tokens"}
+    text = next((b.text for b in r.content if b.type == "text"), "")
+    try:
+        return json.loads(text)
+    except ValueError:
+        return {"_raw": text}
+
+
+def call_llm(provider, model, system, user):
+    return (call_claude if provider == "claude" else call_gemini)(model, system, user)
+
+
+def list_models(provider):
+    if provider == "claude":
+        import anthropic
+        client = anthropic.Anthropic()
+        for m in client.models.list():
+            print(m.id)
+    else:
+        from google import genai
+        client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))  # keep a reference: the
+        for m in client.models.list():                                   # pager fetches lazily
+            if "generateContent" in (getattr(m, "supported_actions", None) or []):
+                print(m.name.removeprefix("models/"))
+
+
+def to_story(raw, story_id, channel, source, previous=None):
     story = {"story": story_id, "channel": channel["name"], "title": raw.get("title", "").strip(),
              "status": "draft", "source": source, "characters": {}, "scenes": []}
     for c in raw.get("characters") or []:
         name = re.sub(r"[^A-Z0-9_]", "_", str(c.get("name", "")).upper()).strip("_")
         if name:
             story["characters"][name] = str(c.get("description", "")).strip()
+    if previous:
+        # Series consistency: recurring characters keep the previous episode's exact description
+        for name, desc in previous["characters"].items():
+            if name in story["characters"]:
+                story["characters"][name] = desc
+        story["previous"] = previous["story"]
     for i, s in enumerate(raw.get("scenes") or [], 1):
         scene = {"id": i, "refs": s.get("refs") or [],
                  "narration": " ".join(str(s.get("narration", "")).split()),
@@ -165,22 +278,36 @@ def main(argv=None):
     ap.add_argument("--source-file", help="text file the story must be based on")
     ap.add_argument("--passage", help='Bible passage to retell, e.g. "Genesis 37:1-11"')
     ap.add_argument("--id", help="story id / file name (default: from the title)")
+    ap.add_argument("--continue-from", metavar="STORY",
+                    help="previous episode's id: reuse its characters exactly and continue its story")
     ap.add_argument("--scenes", type=int, help="number of scenes (default: from target duration)")
-    ap.add_argument("--model", default=DEFAULT_MODEL, help=f"Gemini model (default {DEFAULT_MODEL})")
+    ap.add_argument("--provider", choices=PROVIDERS, default=DEFAULT_PROVIDER,
+                    help=f"LLM to draft with (default {DEFAULT_PROVIDER}; set LLM_PROVIDER in .env to change)")
+    ap.add_argument("--model", help="model id (default: gemini %s, claude %s)"
+                    % (DEFAULT_MODELS["gemini"], DEFAULT_MODELS["claude"]))
     ap.add_argument("--force", action="store_true", help="overwrite even an approved story")
-    ap.add_argument("--list-models", action="store_true", help="list Gemini models available to your key")
+    ap.add_argument("--list-models", action="store_true", help="list models available for --provider")
     args = ap.parse_args(argv)
 
+    args.model = args.model or DEFAULT_MODELS[args.provider]
     if args.list_models:
-        from google import genai
-        for m in genai.Client().models.list():
-            if "generateContent" in (getattr(m, "supported_actions", None) or []):
-                print(m.name.removeprefix("models/"))
+        list_models(args.provider)
         sys.exit(0)
     if not args.channel or not args.brief:
         ap.error("--channel and --brief are required")
 
     channel = load_channel(args.channel)
+    previous = None
+    if args.continue_from:
+        prev_path = os.path.join(SCENES_DIR, f"{args.continue_from}.json")
+        if not os.path.exists(prev_path):
+            sys.exit(f"--continue-from: no such story scenes/{args.continue_from}.json")
+        previous = json.load(open(prev_path))
+        if previous.get("channel") != channel["name"]:
+            sys.exit(f"--continue-from: {args.continue_from} is on channel "
+                     f"'{previous.get('channel')}', not '{channel['name']}'")
+        print(f"Continuing from {args.continue_from} "
+              f"(reusing characters: {', '.join(previous['characters'])})")
     source, source_label, source_text, translation = {"brief": args.brief}, None, None, None
     if args.passage:
         translation = channel.get("passage_translation", "kjv")
@@ -198,32 +325,36 @@ def main(argv=None):
     n_scenes = args.scenes or max(3, round(target / SECONDS_PER_SCENE))
     word_budget = int(target * WORDS_PER_SECOND * 0.9)   # leave room for pauses between scenes
     system, user = build_prompt(channel, args.brief, source_label, source_text,
-                                n_scenes, word_budget, translation)
+                                n_scenes, word_budget, translation, previous)
 
     if args.id and os.path.exists(os.path.join(SCENES_DIR, f"{args.id}.json")):
         existing = json.load(open(os.path.join(SCENES_DIR, f"{args.id}.json")))
         if existing.get("status") == "approved" and not args.force:
             sys.exit(f"scenes/{args.id}.json is APPROVED - not overwriting it. Use --force, or a new --id.")
 
-    print(f"Asking {args.model} for {n_scenes} scenes, ~{word_budget} words ({channel['display_name']})...")
+    print(f"Asking {args.provider}/{args.model} for {n_scenes} scenes, ~{word_budget} words ({channel['display_name']})...")
     story, errs = None, []
     for attempt in range(1, MAX_ATTEMPTS + 1):
         msg = user if not errs else (user + "\nYOUR PREVIOUS ANSWER HAD THESE PROBLEMS - fix all of them:\n"
                                      + "\n".join(f"- {e}" for e in errs))
-        raw = call_gemini(args.model, system, msg)
+        raw = call_llm(args.provider, args.model, system, msg)
         if "_raw" in raw:
             errs = ["response was not valid JSON"]
         else:
             sid = args.id or slugify(raw.get("title", "")) or "story"
-            story = to_story(raw, sid, channel, source)
+            story = to_story(raw, sid, channel, source, previous)
             errs = validate_story(story, source_text=source_text if args.passage else None)
+            words = sum(len(s["narration"].split()) for s in story["scenes"])
+            if words > word_budget * 1.15:
+                errs.append(f"narration is {words} words; it must be at most {word_budget} words "
+                            f"to fit {target} seconds - shorten it")
             if len(story["scenes"]) != n_scenes:
                 errs.append(f"expected {n_scenes} scenes, got {len(story['scenes'])}")
         if not errs:
             break
         print(f"  attempt {attempt}: {len(errs)} problem(s): " + "; ".join(errs[:4]))
     if errs:
-        sys.exit("Gemini didn't produce a valid story after "
+        sys.exit(f"{args.provider} didn't produce a valid story after "
                  f"{MAX_ATTEMPTS} tries:\n  " + "\n  ".join(errs))
 
     out = os.path.join(SCENES_DIR, f"{story['story']}.json")

@@ -174,16 +174,25 @@ def upload_scenes(user):
 
 
 def wait_for_kernel(ref):
-    start = time.time()
+    start, warned = time.time(), False
     while True:
         out = subprocess.run([KAGGLE, "kernels", "status", ref],
                              capture_output=True, text=True).stdout.lower()
         m = re.search(r'status "?([a-z_.]+)', out)
         status = m.group(1) if m else out.strip()
-        print(f"  [{(time.time() - start) / 60:4.1f} min] {status}")
+        mins = (time.time() - start) / 60
+        print(f"  [{mins:4.1f} min] {status}", flush=True)
         if "complete" in status:
             return
-        if any(w in status for w in ("error", "cancel")):
+        if "queued" in status and mins > 10 and not warned:
+            warned = True
+            print("  NOTE: still waiting for a free GPU. Either Kaggle's T4s are busy (try off-peak)\n"
+                  "  or this week's GPU quota is used up (kaggle.com -> Settings -> Accelerator usage).\n"
+                  "  Ctrl+C is safe; the job keeps its place - run --download later.", flush=True)
+        if "cancel" in status:
+            sys.exit(f"Job was cancelled (on kaggle.com, or Kaggle dropped it from the queue). "
+                     f"Nothing was generated - just run again.")
+        if "error" in status:
             sys.exit(f"Run failed - open kaggle.com/code/{ref} and check the log")
         time.sleep(30)
 

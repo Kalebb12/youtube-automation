@@ -1,10 +1,10 @@
-# Story video pipeline (free: Gemini free tier + Kaggle GPU + your laptop)
+# Story video pipeline (Kaggle free GPU + your laptop + Gemini or Claude)
 
-Brief in, narrated YouTube Short out. Works for any niche: each channel is a profile
-in `channels/` (`bible.json` and `horror.json` included).
+Brief in, narrated YouTube Short out. Drafts come from Gemini (free) or Claude (paid).
+Works for any niche: each channel is a profile in `channels/` (`bible.json` and `horror.json` included).
 
 ```
-python script.py --channel bible --passage "Genesis 37:12-24" --brief "Joseph part 2"   # 0. draft (Gemini)
+python script.py --channel bible --passage "Genesis 37:12-24" --brief "Joseph part 2"   # 0. draft
 #   read scenes/<id>.json, fix it, set "status": "approved"                              #    YOU review
 python run_kaggle.py                                                                     # 1. images (Kaggle GPU)
 python voice.py                                                                          # 2. narration (laptop)
@@ -12,6 +12,10 @@ python assemble.py                                                              
 ```
 
 Final video: `images/<story>/<story>.mp4`.
+
+**Guides:** [making an episode](docs/making-an-episode.md) ·
+[channel profiles](docs/channels.md) · [troubleshooting](docs/troubleshooting.md) ·
+[how it works](docs/how-it-works.md)
 
 ## One-time setup
 
@@ -26,8 +30,11 @@ Final video: `images/<story>/<story>.mp4`.
 7. **Cache the model on Kaggle (once):** `python run_kaggle.py --setup-model`
    A CPU-only Kaggle job (no GPU hours) downloads only the SDXL files we use (~7 GB) and saves
    them as its output. ~10-20 min. Never needed again unless you change models.
-8. **Gemini key (free):** create one at https://aistudio.google.com/apikey, then
-   `export GEMINI_API_KEY=...` (add it to `~/.bashrc` to keep it). Never commit it.
+8. **Drafting model (pick one or both):**
+   - Gemini (free): create a key at https://aistudio.google.com/apikey and put `GEMINI_API_KEY=...` in `.env`
+   - Claude (paid, ~$0.05-0.10 per draft): `ant auth login`, or `ANTHROPIC_API_KEY=...` in `.env`;
+     add `LLM_PROVIDER=claude` to `.env` to make it the default
+   `.env` is gitignored. Never commit it.
 
 ## 0. Draft a story — `script.py`
 
@@ -37,15 +44,18 @@ python script.py --channel horror --brief "a lighthouse keeper hears knocking fr
 python script.py --channel horror --brief "retell this faithfully" --source-file my_tale.txt
 ```
 
-Gemini writes `scenes/<id>.json` in the channel's narrator voice: hook first, storytelling
+The model writes `scenes/<id>.json` in the channel's narrator voice: hook first, storytelling
 narration (not verse-by-verse), one image prompt per scene with `{CHARACTER}` placeholders,
 and a `characters` block. Length comes from the channel's `target_duration_s`.
 
 - `--passage` fetches the KJV text from bible-api.com; the draft must retell it faithfully, and
   any quoted words are checked word for word against it (the Bible channel allows one quote).
-- Bad drafts (unknown characters, misquotes, too many quotes...) are sent back to Gemini with the
+- Bad drafts (unknown characters, misquotes, too many quotes, too long...) are sent back with the
   problems listed, up to 3 tries.
-- Options: `--id my_story`, `--scenes 6`, `--model <name>` (`--list-models` shows yours).
+- **Series:** `--continue-from joseph_part1` reuses the previous episode's characters word for word
+  (so Joseph looks the same) and tells the model what already happened. Use it for every part after the first.
+- Options: `--provider claude|gemini`, `--id my_story`, `--scenes 6`, `--model <name>`
+  (`--list-models [--provider claude]` shows yours). Drafts over the channel's length are sent back to shorten.
 
 **Review step (required):** open the file, check every fact against the source, edit freely,
 then change `"status": "draft"` to `"status": "approved"`. `script.py` won't overwrite an approved

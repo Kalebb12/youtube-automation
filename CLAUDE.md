@@ -8,21 +8,24 @@
 
 A faceless YouTube channel engine. A **channel profile** (`channels/<name>.json`)
 holds everything niche-specific; the code is generic. Each video is a **story**
-(`scenes/<id>.json`): storytelling narration + one image prompt per scene. Gemini
-drafts the story, a human approves it, Kaggle renders the images, the laptop
+(`scenes/<id>.json`): storytelling narration + one image prompt per scene. An LLM
+(Gemini free tier, or Claude) drafts the story, a human approves it, Kaggle renders the images, the laptop
 narrates, animates and captions it (upload is next).
 
 The first channel is `bible` (Bible stories); `horror` exists as a second example.
 
-**Guiding constraint: it costs ₦0 to run.** No paid APIs, no paid GPUs (Gemini is used
-on its free tier only). If a change adds a recurring cost, flag it before making it.
+**Guiding constraint: it costs ₦0 to run.** No paid APIs, no paid GPUs. If a change adds a
+recurring cost, flag it before making it. **Exception, chosen by the user:** `script.py
+--provider claude` is paid (~$0.05-0.10 per draft, billed to the user's Anthropic org via the
+`ant auth login` profile); Gemini's free tier stays available and is the default unless
+`LLM_PROVIDER=claude` is set in `.env`.
 
 ## Architecture
 
 ```
 LAPTOP                                          KAGGLE (free GPU, wakes per job)
 ──────                                          ───────────────────────────────
-script.py  ── Gemini (free tier) ──▶ scenes/<id>.json  "status": "draft"
+script.py  ── Gemini / Claude ─────▶ scenes/<id>.json  "status": "draft"
                                          │
                         HUMAN REVIEW → "status": "approved"
                                          │
@@ -48,13 +51,13 @@ saves outputs, shuts down. GPU quota (~30 h/week) is only spent while running.
 | Path | Runs on | Role |
 |---|---|---|
 | `channels/<name>.json` | — | Channel profile: narrator persona/tone, story rules, quote policy, image `style`/`negative`, voice, format, target duration, music mood. |
-| `script.py` | laptop | Stage 0. Gemini (JSON output) drafts `scenes/<id>.json` from a brief, optional `--passage` (KJV via bible-api.com) or `--source-file`. Validates; retries with the errors. |
+| `script.py` | laptop | Stage 0. Gemini or Claude (`--provider`, schema-constrained JSON) drafts `scenes/<id>.json` from a brief, optional `--passage` (KJV via bible-api.com), `--source-file`, `--continue-from <prev episode>`. Validates (incl. word budget); retries with the errors. |
 | `run_kaggle.py` | laptop | Controller. Stages **approved** stories + channel profiles, uploads, pushes the GPU job, polls, downloads. No AI here. |
 | `kaggle_sd/generate.py` | Kaggle GPU | Loads SDXL from the cache, renders every scene with its channel's style. |
 | `kaggle_cache/cache_model.py` | Kaggle CPU | One-time job: downloads SDXL (~7 GB) and saves it as job output for reuse. |
 | `voice.py` | laptop | Kokoro TTS (kokoro-onnx, CPU) per scene, voice from the profile. Cached by text+voice+speed. |
 | `assemble.py` | laptop | FFmpeg: slow zoom per image, burned-in subtitles, optional music, loudness-normalised mp4. |
-| `common.py` | laptop | Shared: channel loading, story schema validation, story loading, ffmpeg helpers. |
+| `common.py` | laptop | Shared: `.env` loading, channel loading, story schema validation, story loading, ffmpeg helpers. |
 | `scenes/*.json` | — | Stories. Source of truth for narration. |
 | `images/` | — | All outputs per story: images, `audio/`, final mp4. Gitignored. |
 | `models/`, `music/` | — | Kokoro model (~350 MB, auto-downloaded); royalty-free music in `music/<channel>/`. Gitignored. |
@@ -66,8 +69,10 @@ Generated, never hand-edited or committed: `kaggle_sd/kernel-metadata.json`,
 
 ```bash
 source .venv/bin/activate
-export GEMINI_API_KEY=...                # free key: https://aistudio.google.com/apikey
+# keys come from .env (gitignored): GEMINI_API_KEY; Claude uses ANTHROPIC_API_KEY or `ant auth login`
 python script.py --channel bible --passage "Genesis 37:12-24" --brief "Joseph part 2: the pit"
+python script.py --provider claude --channel bible --passage "Genesis 37:25-36" \
+    --continue-from joseph_part2 --brief "Joseph part 3: sold to the Ishmeelites"
 python script.py --channel horror --brief "a lighthouse keeper hears knocking from below"
 #   → read scenes/<id>.json, fix it, set "status": "approved"
 python run_kaggle.py --setup-model       # ONE TIME: cache the model on Kaggle
@@ -75,7 +80,7 @@ python run_kaggle.py [story ...]         # approved stories → generate → dow
 python run_kaggle.py --download          # re-download the last finished run
 python voice.py [story]                  # narration → images/<story>/audio/
 python assemble.py [story]               # → images/<story>/<story>.mp4
-python script.py --list-models           # if the default Gemini model is retired
+python script.py --list-models [--provider claude]   # if a default model is retired
 kaggle kernels status <user>/bible-scene-generator   # check a job manually
 ```
 
@@ -124,6 +129,9 @@ Adding a niche = adding a profile. Code changes should never hard-code a niche.
   When a character's look changes mid-story, add a second entry (e.g. `JOSEPH_STRIPPED`).
 - `seed` is optional; default is `1234 + id`. Same seed + prompt + style = same image.
 - `quote` is optional and only for words quoted directly from the source (see Content rules).
+- `previous` (set by `--continue-from`) names the prior episode. Recurring characters keep the
+  prior episode's exact description - that's what makes a series look like one series. Use
+  `--continue-from` for every episode after the first.
 - Optional per-story overrides of the profile: `style`, `negative`, `format`, `voice`, `speed`.
 - `common.validate_story()` is the schema. `script.py` and `run_kaggle.py` both enforce it.
 - `voice.py`/`assemble.py` read narration from `scenes/` (not the copy in `images/`), so
@@ -178,8 +186,8 @@ Never flip a story to `approved` on the user's behalf.
 - Swapping models should only touch `generate.py` + a matching cache job.
 
 **Secrets**
-- `~/.kaggle/kaggle.json` and `GEMINI_API_KEY` are credentials. Never copy them into the
-  repo, print them, or commit them.
+- `~/.kaggle/kaggle.json`, `.env` (`GEMINI_API_KEY`, `ANTHROPIC_API_KEY`) and the `ant` profile are
+  credentials. Never copy them into the repo, print them, or commit them. `.env` is gitignored.
 
 ## Gotchas
 
@@ -190,7 +198,10 @@ Never flip a story to `approved` on the user's behalf.
 - Faces drift / characters blend: SDXL merges people in one image. Prefer one character
   per image; tighten `characters` before reaching for IP-Adapter or LoRAs.
 - Gemini 404: the default model was retired. `python script.py --list-models`, then
-  `--model <name>` or `export GEMINI_MODEL=<name>`. 429 = free-tier rate limit; wait.
+  `--model <name>` or `GEMINI_MODEL=<name>` in `.env`. 429/503 = free tier busy; `script.py`
+  retries for ~2 min, then use `--provider claude`.
+- Claude: default `claude-opus-5-5` (`CLAUDE_MODEL` to change), effort `high`, server-side
+  refusal fallback on. Don't send `temperature` (rejected on current Claude models).
 
 ## Roadmap
 
@@ -198,7 +209,8 @@ Never flip a story to `approved` on the user's behalf.
 - [x] `voice.py`: Kokoro TTS per scene → `images/<story>/audio/scene_XX.wav`
 - [x] `assemble.py`: Ken Burns motion + music bed (FFmpeg) — crossfades not yet
 - [x] Captions: burned-in subtitles, timed from TTS durations (Whisper word timings would be tighter)
-- [x] Channel profiles; `script.py` drafts stories with Gemini; draft → approved gate
+- [x] Channel profiles; `script.py` drafts stories (Gemini or Claude); draft → approved gate
+- [x] Series continuity: `--continue-from` reuses characters across episodes
 - [ ] Upload via YouTube Data API (private by default, human approves publish)
 - [ ] Try Z-Image Turbo vs SDXL on the Joseph story
 - [ ] Narration in Nigerian Pidgin / Yoruba / Igbo
