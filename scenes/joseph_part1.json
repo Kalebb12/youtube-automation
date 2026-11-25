@@ -2,32 +2,38 @@
   "story": "joseph_part1",
   "title": "Joseph and His Brothers (Part 1)",
   "passage": "Genesis 37",
+  "translation": "KJV",
   "format": "short",
   "characters": {
     "JOSEPH": "a beardless 17-year-old teenage boy with a smooth youthful face, short black curly hair, wearing a vibrant robe of many colours",
     "BROTHERS": "older bearded brothers in plain brown shepherd robes",
-    "JACOB": "an old man with a long white beard and a dark blue robe"
+    "JACOB": "an old man with a long white beard and a dark blue robe",
+    "JOSEPH_STRIPPED": "a frightened beardless teenage boy with short black curly hair in a plain torn tunic"
   },
   "scenes": [
     {
       "id": 1,
-      "narration": "Jacob loved his son Joseph more than all his other children, and made him a coat of many colours.",
+      "ref": "Genesis 37:3",
+      "narration": "Now Israel loved Joseph more than all his children, because he was the son of his old age: and he made him a coat of many colours.",
       "image_prompt": "{JOSEPH} holding up a beautiful new coat of many colours with delight, smiling, inside a tent, warm lamp light, his elderly father softly blurred in the background"
     },
     {
       "id": 2,
-      "narration": "When his brothers saw it, they hated him, and could not speak peaceably to him.",
-      "image_prompt": "{BROTHERS} in the foreground glaring with jealousy, arms crossed, among sheep in a field; far in the distance a small figure in a bright multicoloured robe walking away"
+      "ref": "Genesis 37:4",
+      "narration": "And when his brethren saw that their father loved him more than all his brethren, they hated him, and could not speak peaceably unto him.",
+      "image_prompt": "close-up of {BROTHERS} faces scowling with jealousy, side-eyeing, shepherd's field behind them, harsh afternoon light"
     },
     {
       "id": 3,
-      "narration": "Then Joseph dreamed a dream: their sheaves of wheat bowed down to his.",
+      "ref": "Genesis 37:5, 7",
+      "narration": "And Joseph dreamed a dream, and he told it his brethren: and they hated him yet the more. For, behold, we were binding sheaves in the field, and, lo, my sheaf arose, and also stood upright; and, behold, your sheaves stood round about, and made obeisance to my sheaf.",
       "image_prompt": "{JOSEPH} sleeping peacefully on a woven mat under a starry night sky, above him a glowing dreamlike vision of golden wheat sheaves bowing in a circle, dreamy light"
     },
     {
       "id": 4,
-      "narration": "So they took him, and cast him into a pit. And the pit was empty; there was no water in it.",
-      "image_prompt": "view from above looking down into a deep dry stone pit in the desert, a frightened beardless teenage boy with short black curly hair in a plain torn tunic alone at the bottom looking up, a rope hanging down, dramatic dusk light"
+      "ref": "Genesis 37:23-24",
+      "narration": "And it came to pass, when Joseph was come unto his brethren, that they stript Joseph out of his coat, his coat of many colours that was on him; And they took him, and cast him into a pit: and the pit was empty, there was no water in it.",
+      "image_prompt": "view from above looking down into a deep dry stone pit in the desert, {JOSEPH_STRIPPED} alone at the bottom looking up, a rope hanging down, dramatic dusk light"
     }
   ]
 }

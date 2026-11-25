@@ -8,7 +8,7 @@
 4. Put the token where the Kaggle tool looks for it:
    - Windows: `C:\Users\<you>\.kaggle\kaggle.json`
    - Mac/Linux: `~/.kaggle/kaggle.json` then run `chmod 600 ~/.kaggle/kaggle.json`
-5. Install the Kaggle tool: `pip install kaggle`
+5. Install the Kaggle tool: `pip install -r requirements.txt`
 6. Check it works: `kaggle kernels list --mine` (should print without errors)
 7. **Cache the model on Kaggle (once):** `python run_kaggle.py --setup-model`
    This runs `kaggle_cache/cache_model.py` as a CPU-only Kaggle job (no GPU hours used). It downloads
@@ -52,22 +52,25 @@ Edit `STYLE` at the top of `kaggle_sd/generate.py` once, then leave it alone so 
 
 ---
 
-# Step 2: narrated video (on your laptop)
+# Step 2 & 3: narration and video (on your laptop)
 
 ```
-python make_video.py                  # every story in images/
-python make_video.py joseph_part1     # just one
+python voice.py                  # narration for every story in images/
+python assemble.py               # -> images/<story>/<story>.mp4
+python voice.py joseph_part1     # (or just one story)
 ```
 
-For each scene it speaks the `narration` (Kokoro TTS, runs on CPU), shows the image for exactly
-that long with a slow zoom, burns in subtitles, and joins everything into `videos/<story>.mp4`
-(1080x1920 for `"short"`, 1920x1080 for `"long"`). A 4-scene Short takes ~3 min.
+`voice.py` speaks each scene's `narration` with Kokoro TTS (CPU) into `images/<story>/audio/`.
+`assemble.py` shows each image for exactly that long with a slow zoom, burns in subtitles, and
+writes `images/<story>/<story>.mp4` (1080x1920 for `"short"`, 1920x1080 for `"long"`).
 
 - First run downloads the voice model (~350 MB) into `models/` - once.
-- Narration is cached in `audio/<story>/`; only scenes whose text or voice changed are re-spoken.
-- **Voice:** default `bm_george` (calm British male). Try others with `--voice am_michael`,
-  list them with `--voices`, or set `"voice": "...", "speed": 0.95` in the story JSON.
+- Narration is cached; only scenes whose text or voice changed are re-spoken.
+- Narration is read from `scenes/<story>.json`, so fixing a typo doesn't need a GPU re-run.
+- **Voice:** default `bm_george` (calm British male). `python voice.py --voices` lists others;
+  `--voice am_michael` to try one, or set `"voice"` / `"speed"` in the story JSON.
 - **Music:** drop an mp3 in `music/` and it's mixed quietly under the voice automatically
-  (or `--music file.mp3`, `--no-music`). Use royalty-free tracks only (e.g. YouTube Audio Library).
+  (or `--music file.mp3`, `--no-music`). Royalty-free only (e.g. YouTube Audio Library).
+- Narration must be exact KJV/ASV/WEB text (see CLAUDE.md).
 
-Full flow for a new story: add `scenes/<story>.json` -> `python run_kaggle.py` -> `python make_video.py <story>`.
+Full flow for a new story: `scenes/<story>.json` -> `python run_kaggle.py` -> `python voice.py` -> `python assemble.py`.

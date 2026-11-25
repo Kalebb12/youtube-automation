@@ -8,7 +8,7 @@
 
 A faceless YouTube channel engine for Bible stories. Each story is a JSON file of
 scenes (narration + image prompt). The pipeline generates one image per scene on
-Kaggle, then (coming next) narrates, animates, captions and uploads on the laptop.
+Kaggle, then narrates, animates and captions it on the laptop (upload is next).
 
 **Guiding constraint: it costs ₦0 to run.** No paid APIs, no paid GPUs. If a change
 adds a recurring cost, flag it before making it.
@@ -26,7 +26,9 @@ run_kaggle.py ──kaggle kernels push────▶  bible-scene-generator  (
                                             └─ writes /kaggle/working/<story>/*.png
 images/<story>/ ◀──kaggle kernels output───┘
       │
-      └─▶ [next] voice (Kokoro) → assembly (MoviePy/FFmpeg) → captions (Whisper) → upload
+      ├─▶ voice.py     Kokoro TTS (CPU)        → images/<story>/audio/scene_XX.wav
+      ├─▶ assemble.py  FFmpeg zoom + subtitles → images/<story>/<story>.mp4
+      └─▶ [next] upload
 ```
 
 Kaggle jobs are **batch jobs, not servers**: each push boots a fresh machine, runs,
@@ -39,8 +41,12 @@ saves outputs, shuts down. GPU quota (~30 h/week) is only spent while running.
 | `run_kaggle.py` | laptop | Controller. Writes Kaggle metadata, uploads scenes, pushes jobs, polls, downloads. No AI here. |
 | `kaggle_sd/generate.py` | Kaggle GPU | Loads SDXL from the cache, renders every scene of every story. |
 | `kaggle_cache/cache_model.py` | Kaggle CPU | One-time job: downloads SDXL (~7 GB) and saves it as job output for reuse. |
-| `scenes/*.json` | — | Input. One file per story. |
-| `images/` | — | Output, downloaded from Kaggle. Gitignored. |
+| `voice.py` | laptop | Kokoro TTS (kokoro-onnx, CPU) per scene. Cached by text+voice+speed. |
+| `assemble.py` | laptop | FFmpeg: slow zoom per image, burned-in subtitles, optional music, loudness-normalised mp4. |
+| `common.py` | laptop | Shared helpers: story loading, ffmpeg/ffprobe wrappers. |
+| `scenes/*.json` | — | Input. One file per story. Source of truth for narration. |
+| `images/` | — | All outputs per story: images, `audio/`, final mp4. Gitignored. |
+| `models/`, `music/` | — | Kokoro model (~350 MB, auto-downloaded) and royalty-free music. Gitignored. |
 
 `kernel-metadata.json` and `scenes/dataset-metadata.json` are **generated** by
 `run_kaggle.py` from the user's Kaggle username. Don't hand-edit them or commit them.
@@ -52,6 +58,8 @@ source .venv/bin/activate                # always; the scripts shell out to `kag
 python run_kaggle.py --setup-model       # ONE TIME: cache the model on Kaggle
 python run_kaggle.py                     # upload scenes → generate → download
 python run_kaggle.py --download          # re-download the last finished run
+python voice.py [story]                  # narration → images/<story>/audio/
+python assemble.py [story]               # → images/<story>/<story>.mp4
 kaggle kernels status <user>/bible-scene-generator   # check a job manually
 ```
 
@@ -64,10 +72,12 @@ Logs for a failed run: kaggle.com → Your Work → Code → `bible-scene-genera
   "story": "joseph_part1",              // ID → folder name; must be unique
   "title": "Joseph and His Brothers (Part 1)",
   "passage": "Genesis 37",
+  "translation": "KJV",
   "format": "short",                    // "short" = 768x1344 (9:16), "long" = 1344x768
   "characters": { "JOSEPH": "a 17-year-old young man with short black curly hair..." },
   "scenes": [
-    { "id": 1, "narration": "...", "image_prompt": "{JOSEPH} standing in a field", "seed": 555 }
+    { "id": 1, "ref": "Genesis 37:3", "narration": "<exact KJV text>",
+      "image_prompt": "{JOSEPH} standing in a field", "seed": 555 }
   ]
 }
 ```
@@ -76,7 +86,11 @@ Logs for a failed run: kaggle.com → Your Work → Code → `bible-scene-genera
   character consistency works**, so never inline a character description in a prompt.
 - `seed` is optional; default is `1234 + id`. Same seed + prompt = same image.
   To re-roll one scene, set a new seed on that scene only.
-- Optional per-story overrides: `style`, `negative`.
+- When a character's look changes mid-story (e.g. Joseph stripped of his coat), add a
+  second entry like `JOSEPH_STRIPPED` rather than inlining a description.
+- Optional per-story overrides: `style`, `negative`, `voice`, `speed`.
+- `voice.py`/`assemble.py` read narration from `scenes/` (not the copy in `images/`), so
+  narration edits don't need a GPU re-run. They warn if image prompts changed since render.
 - `generate.py` identifies story files as any JSON with a `scenes` list.
 
 ## Rules for working in this repo
@@ -95,11 +109,13 @@ Logs for a failed run: kaggle.com → Your Work → Code → `bible-scene-genera
 
 **Kaggle / GPU**
 - Target hardware is a **T4 (16 GB, fp16, no bf16)**. Keep pipelines in `float16`,
-  keep `enable_vae_slicing()`, and test anything bigger than SDXL for memory first.
+  keep VAE slicing on (`pipe.vae.enable_slicing()`; the pipeline-level `enable_vae_slicing()` was removed from diffusers), and test anything bigger than SDXL for memory first.
 - Load the model **once** per job and batch all stories through it.
 - Never download weights inside `generate.py` in the normal path. Cache them via a
   `kaggle_cache` job and attach with `kernel_sources`. `HF_HUB_OFFLINE=1` enforces this.
 - Only files in `/kaggle/working/` come back to the laptop.
+- `/kaggle/input` is fetched lazily; `generate.py` pre-reads the weights sequentially before
+  loading (8 min → ~30 s). Don't remove that.
 
 **Models and licences** (this channel is monetized)
 - OK: SDXL 1.0, Z-Image Turbo (Apache 2.0), FLUX.2 klein 4B (Apache 2.0).
@@ -121,9 +137,9 @@ Logs for a failed run: kaggle.com → Your Work → Code → `bible-scene-genera
 ## Roadmap
 
 - [x] Image generation on Kaggle with cached model
-- [ ] `voice.py`: Kokoro TTS per scene → `images/<story>/audio/scene_XX.wav`
-- [ ] `assemble.py`: Ken Burns motion + crossfades + music bed (MoviePy/FFmpeg)
-- [ ] Captions: Whisper timings → burned-in subtitles
+- [x] `voice.py`: Kokoro TTS per scene → `images/<story>/audio/scene_XX.wav`
+- [x] `assemble.py`: Ken Burns motion + music bed (FFmpeg) — crossfades not yet
+- [x] Captions: burned-in subtitles, timed from TTS durations (Whisper word timings would be tighter)
 - [ ] `script.py`: Gemini drafts `scenes/*.json` from a passage, for human review
 - [ ] Upload via YouTube Data API (private by default, human approves publish)
 - [ ] Try Z-Image Turbo vs SDXL on the Joseph story
