@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Making an episode, start to finish · Story pipeline docs</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <a class="skip" href="#content">Skip to content</a>
+  <header class="topbar">
+    <a class="brand" href="index.html">Story pipeline <span>docs</span></a>
+    <button class="menu" aria-expanded="false" aria-controls="sidebar">Menu</button>
+  </header>
+  <div class="layout">
+    <nav id="sidebar" class="sidebar" aria-label="Documentation">
+      <ul>
+      <li><a href="index.html">Overview & setup</a></li>
+      <li><a href="making-an-episode.html" aria-current="page">Making an episode</a></li>
+      <li><a href="images.html">Images</a></li>
+      <li><a href="motion.html">Motion</a></li>
+      <li><a href="music.html">Music</a></li>
+      <li><a href="channels.html">Channel profiles</a></li>
+      <li><a href="troubleshooting.html">Troubleshooting</a></li>
+      <li><a href="how-it-works.html">How it works</a></li>
+      </ul>
+      <p class="side-note">Agent instructions: <code>CLAUDE.md</code></p>
+    </nav>
+    <main id="content">
+      <nav class="toc" aria-label="On this page"><p>On this page</p><ul><li><a href="#1-draft-the-script">1. Draft the script</a></li><li><a href="#2-review-it-required">2. Review it (required)</a></li><li><a href="#3-render-the-images-kaggle-gpu">3. Render the images (Kaggle GPU)</a></li><li><a href="#4-narration">4. Narration</a></li><li><a href="#5-video">5. Video</a></li><li><a href="#6-watch-it-before-it-goes-anywhere">6. Watch it before it goes anywhere</a></li><li><a href="#fixing-things-later">Fixing things later</a></li><li><a href="#series-the-next-part">Series: the next part</a></li></ul></nav>
+      <article>
+<h1 id="making-an-episode-start-to-finish">Making an episode, start to finish<a class="anchor" href="#making-an-episode-start-to-finish" aria-label="Link to this section">#</a></h1>
+<p>Worked example (a real run): <strong>Shadrach, Meshach and Abednego in the fiery furnace</strong>
+(Daniel 3:13-28) on the Bible channel.</p>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>Step</th>
+<th>Where</th>
+<th>Time it took</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1. Draft</td>
+<td>laptop → Claude</td>
+<td>51 s</td>
+</tr>
+<tr>
+<td>2. Review + approve</td>
+<td>you</td>
+<td>-</td>
+</tr>
+<tr>
+<td>3. Images (6, FLUX.2 klein)</td>
+<td>Kaggle T4</td>
+<td>10.5 min (~90 s per image) + queue</td>
+</tr>
+<tr>
+<td>4. Narration</td>
+<td>laptop</td>
+<td>~1.5 min</td>
+</tr>
+<tr>
+<td>5. Video</td>
+<td>laptop</td>
+<td>~4-5 min</td>
+</tr>
+</tbody>
+</table></div>
+<p>One-time setup before your first episode: see <a href="index.html#one-time-setup">Overview &amp; setup</a>, including
+<code>python run_kaggle.py --setup-model</code> (caches the image model on Kaggle).</p>
+<h2 id="1-draft-the-script">1. Draft the script<a class="anchor" href="#1-draft-the-script" aria-label="Link to this section">#</a></h2>
+<pre><code class="language-bash">source .venv/bin/activate
+python script.py --provider claude --channel bible \
+    --passage &quot;Daniel 3:13-28&quot; \
+    --brief &quot;Shadrach, Meshach and Abednego refuse to bow to Nebuchadnezzar's golden image, are thrown into the fiery furnace heated seven times hotter, and a fourth figure walks with them in the fire; they come out unburned&quot; \
+    --id fiery_furnace
+</code></pre>
+<p>What happens:</p>
+<ol>
+<li>The passage is fetched from bible-api.com in the channel's translation (KJV).</li>
+<li>The model (Claude Opus 5.5 here; Gemini if you leave out <code>--provider</code>) writes the story in the
+channel's narrator voice: hook first, storytelling (not verse-by-verse), and for each scene a
+structured <strong>shot</strong> - subject, action, setting, camera, lighting - planned for the channel's
+image model (see <a href="images.html">images</a>).</li>
+<li>The draft is checked: placeholders point at real characters, quotes are marked and appear
+word for word in the passage, the narration fits the channel's <code>target_duration_s</code>, and the
+image rules hold (characters per image, nothing a camera can't see, varied cameras, prompt
+length). Problems go back to the model with the exact issue (up to 3 tries).</li>
+<li><code>scenes/fiery_furnace.json</code> is written with <code>&quot;status&quot;: &quot;draft&quot;</code>.</li>
+</ol>
+<p><strong>Which provider?</strong> Gemini is free but its free tier is often overloaded (503) - <code>script.py</code> retries
+for ~2 minutes, then gives up. Claude costs about $0.05-0.10 per draft and answers in under a
+minute. Put <code>LLM_PROVIDER=claude</code> in <code>.env</code> to make it the default.</p>
+<h2 id="2-review-it-required">2. Review it (required)<a class="anchor" href="#2-review-it-required" aria-label="Link to this section">#</a></h2>
+<p>Open <code>scenes/fiery_furnace.json</code> next to the passage. Check:</p>
+<ul>
+<li>[ ] Every event, speaker and detail is in the passage. Nothing invented (motives, dialogue,
+names, numbers, doctrine).</li>
+<li>[ ] The hook (scene 1) is drawn from the story, not a question to the viewer.</li>
+<li>[ ] Anything in quotation marks is exact public-domain text and has a matching <code>quote</code> field
+(here: <em>&quot;But if not, be it known unto thee, O king, that we will not serve thy gods&quot;</em>, 3:18).</li>
+<li>[ ] Characters have purely visual descriptions that are easy to tell apart.</li>
+<li>[ ] Each <code>image_prompt</code> shows this scene's key moment, named characters in the foreground,
+extras in the background. Sensitive figures follow the channel rules (here the fourth man in
+the fire is a plain silhouette - no halo).</li>
+<li>[ ] Narration reads well aloud. Kokoro can stumble on archaic words - spell them how they sound
+if needed.</li>
+</ul>
+<p>Edit anything you like, then set <code>&quot;status&quot;: &quot;approved&quot;</code>. Nothing reaches the GPU until you do.</p>
+<h2 id="3-render-the-images-kaggle-gpu">3. Render the images (Kaggle GPU)<a class="anchor" href="#3-render-the-images-kaggle-gpu" aria-label="Link to this section">#</a></h2>
+<pre><code class="language-bash">python run_kaggle.py fiery_furnace      # or no name: every approved story
+</code></pre>
+<ul>
+<li>Uploads the approved story plus the channel profiles, attaches the cached image model, starts
+the GPU job, polls every 30 s, then downloads <code>images/fiery_furnace/scene_01.png ...</code>.</li>
+<li>FLUX.2 klein on the T4: ~90 s to load, ~90 s per image (bf16 is emulated on the T4).</li>
+<li>If it sits in <code>queued</code> for a long time, see <a href="troubleshooting.html#job-stuck-in-queued">troubleshooting</a>.</li>
+</ul>
+<p>Look at the images. To redo one, add <code>&quot;seed&quot;: 555</code> (any number) to that scene, or adjust its
+<code>image_prompt</code>, and run again.</p>
+<h2 id="4-narration">4. Narration<a class="anchor" href="#4-narration" aria-label="Link to this section">#</a></h2>
+<pre><code class="language-bash">python voice.py fiery_furnace
+</code></pre>
+<p>Speaks each scene with the channel's voice (Bible: <code>bm_george</code>, speed 0.95) into
+<code>images/fiery_furnace/audio/</code>. Prints the total length against the channel target. Cached: only
+scenes whose text or voice changed are re-spoken.</p>
+<h2 id="5-video">5. Video<a class="anchor" href="#5-video" aria-label="Link to this section">#</a></h2>
+<pre><code class="language-bash">python assemble.py fiery_furnace
+</code></pre>
+<p>Each image stays up for its narration plus a short pause, as a slow eased camera move with depth
+parallax (see <a href="motion.html">motion</a>), crossfading into the next scene; the whole video fades in from
+and out to black. Subtitles are burned in (balanced chunks, clear of the Shorts UI), music from
+<code>music/bible/</code> is ducked under the voice, and the mix is levelled to -16 LUFS.
+Output: <code>images/fiery_furnace/fiery_furnace.mp4</code> (1080x1920, ~55 s, ~22 MB).</p>
+<p>To pick the music first, audition it in seconds (see <a href="music.html">music</a>):</p>
+<pre><code class="language-bash">python music.py preview fiery_furnace --volume-db -16      # → images/fiery_furnace/music_preview.mp3
+python music.py set fiery_furnace --volume-db -16          # keep it
+</code></pre>
+<h2 id="6-watch-it-before-it-goes-anywhere">6. Watch it before it goes anywhere<a class="anchor" href="#6-watch-it-before-it-goes-anywhere" aria-label="Link to this section">#</a></h2>
+<p>Every video gets watched in full before publishing: pronunciation, subtitle timing, any image
+that contradicts the narration.</p>
+<h2 id="fixing-things-later">Fixing things later<a class="anchor" href="#fixing-things-later" aria-label="Link to this section">#</a></h2>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>You changed...</th>
+<th>Re-run</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>narration text</td>
+<td><code>voice.py</code> + <code>assemble.py</code> (no GPU)</td>
+</tr>
+<tr>
+<td>an image prompt, seed, character description</td>
+<td><code>run_kaggle.py</code> + <code>assemble.py</code> (voice is cached)</td>
+</tr>
+<tr>
+<td>the voice or speed</td>
+<td><code>voice.py</code> + <code>assemble.py</code></td>
+</tr>
+<tr>
+<td>motion (parallax, transitions, fades)</td>
+<td><code>assemble.py</code> (depth maps are cached)</td>
+</tr>
+<tr>
+<td>music</td>
+<td><code>music.py preview</code> to audition, <code>music.py set</code>, then <code>assemble.py</code></td>
+</tr>
+</tbody>
+</table></div>
+<p><code>voice.py</code> and <code>assemble.py</code> warn you if image prompts changed since the images were rendered.</p>
+<h2 id="series-the-next-part">Series: the next part<a class="anchor" href="#series-the-next-part" aria-label="Link to this section">#</a></h2>
+<p>For a multi-part story, draft each later part with <code>--continue-from &lt;previous id&gt;</code>: the previous
+episode's characters are reused word for word (so people look the same across episodes) and its
+narration is given as &quot;previously on&quot;, so the new part doesn't repeat it.</p>
+<pre><code class="language-bash">python script.py --provider claude --channel bible --passage &quot;Genesis 37:25-36&quot; \
+    --continue-from joseph_part2 --brief &quot;Joseph and His Brothers (Part 3): sold to the Ishmeelites&quot;
+</code></pre>
+
+      </article>
+    </main>
+  </div>
+  <script>
+    const b = document.querySelector('.menu'), s = document.getElementById('sidebar');
+    b.addEventListener('click', () => { const o = s.classList.toggle('open'); b.setAttribute('aria-expanded', o); });
+  </script>
+</body>
+</html>

@@ -65,6 +65,13 @@ saves outputs, shuts down. GPU quota (~30 h/week) is only spent while running.
 | `images/` | — | All outputs per story: images, `audio/`, final mp4. Gitignored. |
 | `models/`, `music/` | — | Kokoro model (~350 MB, auto-downloaded); royalty-free music in `music/<channel>/`. Gitignored. |
 
+**Docs are HTML:** `docs/*.html` + `docs/style.css` (open `docs/index.html`). Pages: index (overview &
+setup), making-an-episode, images, motion, music, channels, troubleshooting, how-it-works. When
+behaviour, commands, defaults or timings change, update the matching page in the same change -
+edit the HTML directly, reuse the existing structure (`<h2 id=...>` sections, `.table-wrap`
+tables), keep the sidebar list identical on every page, and check internal links still resolve.
+`README.md` is only a short pointer to the docs.
+
 Generated, never hand-edited or committed: `kaggle_sd/kernel-metadata.json`,
 `kaggle_cache/kernel-metadata.json`, `.kaggle_upload/` (the staged dataset).
 

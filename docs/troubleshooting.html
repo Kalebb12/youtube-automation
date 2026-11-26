@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Troubleshooting · Story pipeline docs</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <a class="skip" href="#content">Skip to content</a>
+  <header class="topbar">
+    <a class="brand" href="index.html">Story pipeline <span>docs</span></a>
+    <button class="menu" aria-expanded="false" aria-controls="sidebar">Menu</button>
+  </header>
+  <div class="layout">
+    <nav id="sidebar" class="sidebar" aria-label="Documentation">
+      <ul>
+      <li><a href="index.html">Overview & setup</a></li>
+      <li><a href="making-an-episode.html">Making an episode</a></li>
+      <li><a href="images.html">Images</a></li>
+      <li><a href="motion.html">Motion</a></li>
+      <li><a href="music.html">Music</a></li>
+      <li><a href="channels.html">Channel profiles</a></li>
+      <li><a href="troubleshooting.html" aria-current="page">Troubleshooting</a></li>
+      <li><a href="how-it-works.html">How it works</a></li>
+      </ul>
+      <p class="side-note">Agent instructions: <code>CLAUDE.md</code></p>
+    </nav>
+    <main id="content">
+      <nav class="toc" aria-label="On this page"><p>On this page</p><ul><li><a href="#drafting-script-py">Drafting (script.py)</a></li><li><a href="#images-run-kaggle-py-kaggle">Images (run_kaggle.py / Kaggle)</a></li><li><a href="#laptop-voice-py-assemble-py">Laptop (voice.py / assemble.py)</a></li></ul></nav>
+      <article>
+<h1 id="troubleshooting">Troubleshooting<a class="anchor" href="#troubleshooting" aria-label="Link to this section">#</a></h1>
+<p>Every problem below actually happened while building this pipeline.</p>
+<h2 id="drafting-script-py">Drafting (<code>script.py</code>)<a class="anchor" href="#drafting-script-py" aria-label="Link to this section">#</a></h2>
+<p><strong><code>Gemini API error: 404 ... no longer available</code></strong>
+The default model was retired. <code>python script.py --list-models</code>, then <code>--model &lt;name&gt;</code> or
+<code>GEMINI_MODEL=&lt;name&gt;</code> in <code>.env</code>. (2.5-flash was retired for new users in Nov 2026; the default
+is now <code>gemini-3.8-flash</code>.)</p>
+<p><strong><code>Gemini busy (503) - retrying...</code> then <code>Gemini is overloaded</code></strong>
+The free tier is often saturated. <code>script.py</code> retries for ~2 minutes. Try another <code>--model</code>,
+try later, or use <code>--provider claude</code>.</p>
+<p><strong><code>Claude: no valid credentials</code></strong>
+Run <code>ant auth login</code>, or put <code>ANTHROPIC_API_KEY=...</code> in <code>.env</code>. OAuth logins expire; log in again.</p>
+<p><strong><code>attempt 1: N problem(s): ...</code> then success</strong>
+Normal: the draft failed validation (too long, misquote, unknown character) and was sent back
+with the problems listed.</p>
+<p><strong><code>is APPROVED - not overwriting it</code></strong>
+Protection for reviewed stories. Use a new <code>--id</code>, or <code>--force</code> if you really mean it.</p>
+<p><strong><code>quote is not word-for-word from the source passage</code></strong>
+The model paraphrased inside quotation marks. It's retried automatically; if you edit quotes by
+hand, copy them exactly from the translation.</p>
+<h2 id="images-run-kaggle-py-kaggle">Images (<code>run_kaggle.py</code> / Kaggle)<a class="anchor" href="#images-run-kaggle-py-kaggle" aria-label="Link to this section">#</a></h2>
+<h3 id="job-stuck-in-queued">Job stuck in <code>queued</code><a class="anchor" href="#job-stuck-in-queued" aria-label="Link to this section">#</a></h3>
+<p>Kaggle hasn't given the job a GPU. Either the free T4s are busy (try off-peak) or this week's
+~30 h GPU quota is used up (kaggle.com → Settings → Accelerator usage). After 10 minutes the
+script prints a note. Ctrl+C is safe: the job keeps running on Kaggle; fetch the result later
+with <code>python run_kaggle.py --download</code>.</p>
+<p><strong><code>Job was cancelled</code></strong> - cancelled on kaggle.com, or Kaggle dropped it from the queue (seen after
+~30 min queued). Nothing was generated and no GPU time was used. Run again.</p>
+<p><strong><code>No approved stories to generate</code></strong> - every story is still a draft. Review one and set
+<code>&quot;status&quot;: &quot;approved&quot;</code>.</p>
+<p><strong><code>These approved stories are invalid</code></strong> - fix the listed problems (e.g. <code>{NOBODY}</code> used but not
+defined in <code>characters</code>).</p>
+<p><strong><code>Model cache not found</code></strong> - run <code>python run_kaggle.py --setup-model</code> once (CPU job, no GPU hours).</p>
+<p><strong>No internet inside the Kaggle job</strong> (<code>Failed to resolve 'pypi.org'</code>) - verify your phone number
+on Kaggle, and if needed open the notebook on kaggle.com → Settings → Internet: On → Save Version.</p>
+<p><strong><code>'StableDiffusionXLPipeline' object has no attribute 'enable_vae_slicing'</code></strong> - fixed in
+<code>generate.py</code> (newer diffusers moved it to <code>pipe.vae.enable_slicing()</code>).</p>
+<p><strong>Model load takes ~8 minutes</strong> - <code>/kaggle/input</code> is fetched lazily; <code>generate.py</code> pre-reads the
+weights sequentially first (~30 s). Don't remove that block.</p>
+<p><strong>Two people blended into one face / Joseph has a beard</strong> - SDXL mixes described people (FLUX.2
+klein much less). Give each image one main subject; make descriptions distinct (&quot;beardless&quot;,
+&quot;smooth youthful face&quot;); re-roll with a <code>seed</code>.</p>
+<p><strong><code>truncated because CLIP can only handle sequences up to 77 tokens</code></strong> (SDXL) - the prompt was too
+long and the end (the channel style) was dropped. <code>script.py</code> prevents this for new drafts;
+<code>run_kaggle.py</code> warns about old ones.</p>
+<p><strong><code>prompt + style is N CLIP tokens, limit 75</code></strong> - shorten the shot or the character description.</p>
+<p><strong><code>Model cache not found ... flux2-klein</code></strong> - <code>python run_kaggle.py --setup-model flux2-klein</code> once.</p>
+<p><strong>FLUX.2 klein is slow</strong> - the T4 has no native bf16, so it's emulated; 4 steps keep it bearable.
+<strong><code>WARNING scene_XX.png is black</code></strong> - numeric overflow; tell Claude, the dtype may need changing.</p>
+<p><strong>Black images</strong> - fp16 VAE overflow; the pipeline uses <code>madebyollin/sdxl-vae-fp16-fix</code> for this.</p>
+<h2 id="laptop-voice-py-assemble-py">Laptop (<code>voice.py</code> / <code>assemble.py</code>)<a class="anchor" href="#laptop-voice-py-assemble-py" aria-label="Link to this section">#</a></h2>
+<p><strong><code>kaggle: No such file or directory</code></strong> - run with the venv active, or call <code>.venv/bin/python</code>;
+<code>run_kaggle.py</code> also finds <code>.venv/bin/kaggle</code> on its own.</p>
+<p><strong><code>NOTE: ... is still a DRAFT</code></strong> - informational; previews work on drafts.</p>
+<p><strong><code>NOTE: image prompts for scenes [...] changed since the images were made</code></strong> - re-render with
+<code>run_kaggle.py</code> if you want the images to match.</p>
+<p><strong><code>WARNING: Ns over target</code></strong> - the narration is longer than the channel's target; trim it.</p>
+<p><strong><code>(no music: add tracks to music/&lt;channel&gt;/ ...)</code></strong> - the pool is empty; the video is narration
+only. <code>python music.py list</code> shows what's found where.</p>
+<p><strong><code>Music track not found</code></strong> - a story's <code>track</code> names a file that isn't in <code>music/&lt;channel&gt;/</code>,
+its mood folder, or <code>music/</code>. Fix the name or <code>python music.py set &lt;story&gt; --clear</code>.</p>
+<p><strong>Music too loud / too quiet</strong> - change <code>volume_db</code> (story or channel), audition with
+<code>python music.py preview &lt;story&gt; --volume-db -22</code>. Tracks are levelled first, so the same number
+works for any track.</p>
+<p><strong>Warping / smeared edges around people</strong> - parallax too strong for that image. Lower it:
+<code>&quot;motion&quot;: {&quot;strength&quot;: 0.6}</code> in the story, or <code>python assemble.py &lt;story&gt; --strength 0.6</code>, or <code>--flat</code>.</p>
+<p><strong>Depth looks wrong after replacing an image</strong> - the cache is keyed on the file's size and time;
+delete <code>images/&lt;story&gt;/depth/</code> to force a recompute.</p>
+<p><strong>Voice model download stalls</strong> - the model files come from GitHub releases; delete the partial
+file in <code>models/</code> and run again (or download with <code>curl -C -</code> to resume).</p>
+
+      </article>
+    </main>
+  </div>
+  <script>
+    const b = document.querySelector('.menu'), s = document.getElementById('sidebar');
+    b.addEventListener('click', () => { const o = s.classList.toggle('open'); b.setAttribute('aria-expanded', o); });
+  </script>
+</body>
+</html>

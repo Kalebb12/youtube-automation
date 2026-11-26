@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Background music · Story pipeline docs</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <a class="skip" href="#content">Skip to content</a>
+  <header class="topbar">
+    <a class="brand" href="index.html">Story pipeline <span>docs</span></a>
+    <button class="menu" aria-expanded="false" aria-controls="sidebar">Menu</button>
+  </header>
+  <div class="layout">
+    <nav id="sidebar" class="sidebar" aria-label="Documentation">
+      <ul>
+      <li><a href="index.html">Overview & setup</a></li>
+      <li><a href="making-an-episode.html">Making an episode</a></li>
+      <li><a href="images.html">Images</a></li>
+      <li><a href="motion.html">Motion</a></li>
+      <li><a href="music.html" aria-current="page">Music</a></li>
+      <li><a href="channels.html">Channel profiles</a></li>
+      <li><a href="troubleshooting.html">Troubleshooting</a></li>
+      <li><a href="how-it-works.html">How it works</a></li>
+      </ul>
+      <p class="side-note">Agent instructions: <code>CLAUDE.md</code></p>
+    </nav>
+    <main id="content">
+      <nav class="toc" aria-label="On this page"><p>On this page</p><ul><li><a href="#1-add-tracks">1. Add tracks</a></li><li><a href="#2-how-a-track-is-chosen">2. How a track is chosen</a></li><li><a href="#3-how-it-s-mixed">3. How it's mixed</a></li><li><a href="#4-where-settings-live">4. Where settings live</a></li><li><a href="#5-audition-quickly-then-save">5. Audition quickly, then save</a></li></ul></nav>
+      <article>
+<h1 id="background-music">Background music<a class="anchor" href="#background-music" aria-label="Link to this section">#</a></h1>
+<p>Music is optional. With no tracks, videos are narration only. Everything below is done by
+<code>music.py</code> (tools) and <code>assemble.py</code> (the final mix).</p>
+<h2 id="1-add-tracks">1. Add tracks<a class="anchor" href="#1-add-tracks" aria-label="Link to this section">#</a></h2>
+<p>Royalty-free only: the channels are monetized. Good free sources: YouTube Audio Library
+(Studio → Audio Library; check each track's licence and attribution rule), Pixabay Music.</p>
+<pre><code>music/
+  bible/                    the Bible channel's pool
+    calm_strings.mp3
+    soft_piano.mp3
+    tense/                  optional mood folder
+      low_drums.mp3
+  horror/
+    drone_01.mp3
+  shared_fallback.mp3       used by any channel with an empty pool
+</code></pre>
+<p><code>music/</code> is gitignored (big binary files). Check what's there:</p>
+<pre><code class="language-bash">python music.py list            # every channel
+python music.py list bible
+</code></pre>
+<h2 id="2-how-a-track-is-chosen">2. How a track is chosen<a class="anchor" href="#2-how-a-track-is-chosen" aria-label="Link to this section">#</a></h2>
+<ol>
+<li>A story's explicit <code>track</code> (a file name in the pool, or a path) - or <code>&quot;none&quot;</code> for silence.</li>
+<li>Otherwise the pool: <code>music/&lt;channel&gt;/&lt;mood&gt;/</code> if a <code>mood</code> is set, else <code>music/&lt;channel&gt;/</code>,
+else <code>music/</code>.</li>
+<li><code>pick: &quot;rotate&quot;</code> (default) gives each story a different track from the pool, and the <em>same</em>
+one every time that story is rebuilt. <code>pick: &quot;first&quot;</code> always uses the first file.</li>
+</ol>
+<h2 id="3-how-it-s-mixed">3. How it's mixed<a class="anchor" href="#3-how-it-s-mixed" aria-label="Link to this section">#</a></h2>
+<p>Each track is first levelled to a fixed loudness, so <code>volume_db</code> means the same for every track,
+however loud the original file is. Then:</p>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>Setting</th>
+<th>Default</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>volume_db</code></td>
+<td><code>-20</code></td>
+<td>Music level under the voice. <code>-24</code> = barely there, <code>-12</code> = prominent.</td>
+</tr>
+<tr>
+<td><code>duck</code></td>
+<td><code>true</code></td>
+<td>Music dips while the narrator speaks (~9 dB) and swells back in the pauses.</td>
+</tr>
+<tr>
+<td><code>start</code></td>
+<td><code>0</code></td>
+<td>Seconds into the track to start - skip a slow intro.</td>
+</tr>
+<tr>
+<td><code>fade_in</code> / <code>fade_out</code></td>
+<td><code>1.5</code> / <code>2.5</code></td>
+<td>Seconds.</td>
+</tr>
+<tr>
+<td><code>mood</code></td>
+<td>-</td>
+<td>Pick from <code>music/&lt;channel&gt;/&lt;mood&gt;/</code>.</td>
+</tr>
+<tr>
+<td><code>pick</code></td>
+<td><code>rotate</code></td>
+<td><code>rotate</code> or <code>first</code>.</td>
+</tr>
+<tr>
+<td><code>track</code></td>
+<td>-</td>
+<td>A specific file, or <code>&quot;none&quot;</code>.</td>
+</tr>
+</tbody>
+</table></div>
+<p>Tracks shorter than the video loop. The final mix is normalised to -16 LUFS (YouTube's level).</p>
+<h2 id="4-where-settings-live">4. Where settings live<a class="anchor" href="#4-where-settings-live" aria-label="Link to this section">#</a></h2>
+<p>Each level overrides the one before:</p>
+<pre><code>built-in defaults  &lt;  channel profile &quot;music&quot;  &lt;  story &quot;music&quot;  &lt;  command-line flags
+</code></pre>
+<p><strong>Channel profile</strong> (<code>channels/bible.json</code>) - the channel's house mix:</p>
+<pre><code class="language-json">&quot;music&quot;: {&quot;pick&quot;: &quot;rotate&quot;, &quot;volume_db&quot;: -20, &quot;fade_in&quot;: 2, &quot;fade_out&quot;: 3, &quot;duck&quot;: true}
+</code></pre>
+<p><strong>Story</strong> (<code>scenes/&lt;story&gt;.json</code>) - one episode's choice, e.g. a darker track for the pit scene:</p>
+<pre><code class="language-json">&quot;music&quot;: {&quot;mood&quot;: &quot;tense&quot;, &quot;volume_db&quot;: -17, &quot;start&quot;: 12}
+</code></pre>
+<p><strong>Command line</strong> - one-off, not saved:</p>
+<pre><code class="language-bash">python assemble.py fiery_furnace --track soft_piano.mp3 --volume-db -16 --start 10 --no-duck
+python assemble.py fiery_furnace --no-music
+</code></pre>
+<h2 id="5-audition-quickly-then-save">5. Audition quickly, then save<a class="anchor" href="#5-audition-quickly-then-save" aria-label="Link to this section">#</a></h2>
+<p>A full video rebuild takes ~4-5 minutes. A preview takes ~20 seconds: it mixes the story's
+narration (with the video's exact timing) and the music into an mp3, no video.</p>
+<pre><code class="language-bash">python music.py preview fiery_furnace                                  # current settings
+python music.py preview fiery_furnace --track soft_piano.mp3 --volume-db -16 --start 10
+python music.py preview fiery_furnace --mood tense --seconds 20        # just the first 20 s
+# listen to images/fiery_furnace/music_preview.mp3
+
+python music.py set fiery_furnace --track soft_piano.mp3 --volume-db -16 --start 10   # save it
+python assemble.py fiery_furnace                                       # rebuild the video
+</code></pre>
+<p>Other <code>set</code> options: <code>--none</code> (this story has no music), <code>--clear</code> (back to channel defaults).
+Story music settings are validated: unknown keys or wrong types are reported by <code>run_kaggle.py</code>
+and <code>script.py</code> like any other story problem.</p>
+
+      </article>
+    </main>
+  </div>
+  <script>
+    const b = document.querySelector('.menu'), s = document.getElementById('sidebar');
+    b.addEventListener('click', () => { const o = s.classList.toggle('open'); b.setAttribute('aria-expanded', o); });
+  </script>
+</body>
+</html>

@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Motion: camera moves, parallax, crossfades · Story pipeline docs</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <a class="skip" href="#content">Skip to content</a>
+  <header class="topbar">
+    <a class="brand" href="index.html">Story pipeline <span>docs</span></a>
+    <button class="menu" aria-expanded="false" aria-controls="sidebar">Menu</button>
+  </header>
+  <div class="layout">
+    <nav id="sidebar" class="sidebar" aria-label="Documentation">
+      <ul>
+      <li><a href="index.html">Overview & setup</a></li>
+      <li><a href="making-an-episode.html">Making an episode</a></li>
+      <li><a href="images.html">Images</a></li>
+      <li><a href="motion.html" aria-current="page">Motion</a></li>
+      <li><a href="music.html">Music</a></li>
+      <li><a href="channels.html">Channel profiles</a></li>
+      <li><a href="troubleshooting.html">Troubleshooting</a></li>
+      <li><a href="how-it-works.html">How it works</a></li>
+      </ul>
+      <p class="side-note">Agent instructions: <code>CLAUDE.md</code></p>
+    </nav>
+    <main id="content">
+      <nav class="toc" aria-label="On this page"><p>On this page</p><ul><li><a href="#what-you-get">What you get</a></li><li><a href="#settings">Settings</a></li><li><a href="#why-not-ai-video-wan-2-2">Why not AI video (Wan 2.2)?</a></li></ul></nav>
+      <article>
+<h1 id="motion-camera-moves-parallax-crossfades">Motion: camera moves, parallax, crossfades<a class="anchor" href="#motion-camera-moves-parallax-crossfades" aria-label="Link to this section">#</a></h1>
+<p>Every scene is a still image, but none of them sits still. <code>assemble.py</code> (using <code>motion.py</code>) turns
+each image into a slow camera move with depth parallax, crossfades between scenes, and fades the
+whole video in from black and out to black. It all runs on your laptop CPU - no GPU, no cost.</p>
+<h2 id="what-you-get">What you get<a class="anchor" href="#what-you-get" aria-label="Link to this section">#</a></h2>
+<ul>
+<li><strong>Depth parallax (&quot;2.5D&quot;).</strong> A small depth model (Depth Anything V2 Small, Apache 2.0, ~100 MB,
+downloaded once into <code>models/</code>) works out what is near and far in each image. As the camera
+drifts, near things (the three men) move more than the background (the furnace), so the still
+reads as a real camera move. Depth maps are cached in <code>images/&lt;story&gt;/depth/</code>.</li>
+<li><strong>Eased camera moves.</strong> Each scene gets one of <code>zoom_in</code>, <code>pan_right</code>, <code>zoom_out</code>, <code>pan_left</code>, in
+that cycle so no two neighbours match. Moves start and stop gently (smoothstep).</li>
+<li><strong>Crossfades</strong> between scenes instead of hard cuts. Narration timing is unchanged: the next image
+starts fading in exactly at the scene boundary.</li>
+<li><strong>Fade in / fade out</strong> of the whole video.</li>
+</ul>
+<p>Speed: about 12 s of CPU per 5 s of video, so ~2-3 minutes for a Short (first run adds ~5 s per
+image for depth, plus the one-time model download).</p>
+<h2 id="settings">Settings<a class="anchor" href="#settings" aria-label="Link to this section">#</a></h2>
+<p>Channel profile <code>&quot;motion&quot;</code> &lt; story <code>&quot;motion&quot;</code> &lt; command-line flags. A scene can pin its move.</p>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>Setting</th>
+<th>Bible default</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>parallax</code></td>
+<td><code>true</code></td>
+<td>Depth parallax on. <code>false</code> = flat Ken Burns.</td>
+</tr>
+<tr>
+<td><code>strength</code></td>
+<td><code>1.0</code></td>
+<td>Parallax amount. <code>0.5</code> subtle, <code>1.5</code> strong. Too high shows warping at edges.</td>
+</tr>
+<tr>
+<td><code>zoom</code></td>
+<td><code>0.08</code></td>
+<td>How far zoom moves travel (8%).</td>
+</tr>
+<tr>
+<td><code>transition</code></td>
+<td><code>&quot;fade&quot;</code></td>
+<td>Crossfade style - any ffmpeg <code>xfade</code> transition: <code>fade</code>, <code>dissolve</code>, <code>fadeblack</code>, <code>fadewhite</code>, <code>smoothleft</code>, <code>smoothright</code>, <code>circleopen</code>, <code>radial</code>, ...</td>
+</tr>
+<tr>
+<td><code>transition_s</code></td>
+<td><code>0.7</code></td>
+<td>Crossfade length (s). <code>0</code> = hard cuts.</td>
+</tr>
+<tr>
+<td><code>fade_in</code></td>
+<td><code>0.6</code></td>
+<td>Fade from black at the start (s).</td>
+</tr>
+<tr>
+<td><code>fade_out</code></td>
+<td><code>1.2</code></td>
+<td>Fade to black at the end (s).</td>
+</tr>
+</tbody>
+</table></div>
+<p>Horror uses stronger parallax (<code>1.3</code>), <code>fadeblack</code> transitions and slower fades.</p>
+<p>Per scene, in <code>scenes/&lt;story&gt;.json</code>:</p>
+<pre><code class="language-json">{&quot;id&quot;: 5, &quot;move&quot;: &quot;zoom_in&quot;, ...}       // zoom_in | zoom_out | pan_left | pan_right
+</code></pre>
+<p>Per story:</p>
+<pre><code class="language-json">&quot;motion&quot;: {&quot;strength&quot;: 1.4, &quot;transition&quot;: &quot;dissolve&quot;, &quot;transition_s&quot;: 1.0}
+</code></pre>
+<p>One-off from the command line:</p>
+<pre><code class="language-bash">python assemble.py fiery_furnace --strength 1.4 --transition dissolve --transition-s 1.0
+python assemble.py fiery_furnace --flat            # no parallax
+</code></pre>
+<h2 id="why-not-ai-video-wan-2-2">Why not AI video (Wan 2.2)?<a class="anchor" href="#why-not-ai-video-wan-2-2" aria-label="Link to this section">#</a></h2>
+<p>We checked: Wan2.2's only model in reach (TI2V-5B) needs ~24 GB of GPU memory even with offloading,
+against the free Kaggle T4's 16 GB, and takes ~9 minutes per 5-second clip on an RTX 4090 - very
+roughly an hour or more per clip on a T4, i.e. most of a week's free GPU quota per video. The 14B
+image-to-video model is 126 GB. Depth parallax gives most of the &quot;moving shot&quot; feel for free.
+It remains a possible experiment for the hook scene only.</p>
+
+      </article>
+    </main>
+  </div>
+  <script>
+    const b = document.querySelector('.menu'), s = document.getElementById('sidebar');
+    b.addEventListener('click', () => { const o = s.classList.toggle('open'); b.setAttribute('aria-expanded', o); });
+  </script>
+</body>
+</html>

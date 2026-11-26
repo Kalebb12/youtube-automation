@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Channel profiles · Story pipeline docs</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <a class="skip" href="#content">Skip to content</a>
+  <header class="topbar">
+    <a class="brand" href="index.html">Story pipeline <span>docs</span></a>
+    <button class="menu" aria-expanded="false" aria-controls="sidebar">Menu</button>
+  </header>
+  <div class="layout">
+    <nav id="sidebar" class="sidebar" aria-label="Documentation">
+      <ul>
+      <li><a href="index.html">Overview & setup</a></li>
+      <li><a href="making-an-episode.html">Making an episode</a></li>
+      <li><a href="images.html">Images</a></li>
+      <li><a href="motion.html">Motion</a></li>
+      <li><a href="music.html">Music</a></li>
+      <li><a href="channels.html" aria-current="page">Channel profiles</a></li>
+      <li><a href="troubleshooting.html">Troubleshooting</a></li>
+      <li><a href="how-it-works.html">How it works</a></li>
+      </ul>
+      <p class="side-note">Agent instructions: <code>CLAUDE.md</code></p>
+    </nav>
+    <main id="content">
+      <nav class="toc" aria-label="On this page"><p>On this page</p><ul><li><a href="#creating-a-channel">Creating a channel</a></li><li><a href="#field-reference">Field reference</a></li><li><a href="#writing-good-story-rules">Writing good story_rules</a></li><li><a href="#writing-a-good-style">Writing a good style</a></li><li><a href="#per-story-overrides">Per-story overrides</a></li></ul></nav>
+      <article>
+<h1 id="channel-profiles">Channel profiles<a class="anchor" href="#channel-profiles" aria-label="Link to this section">#</a></h1>
+<p>A channel profile (<code>channels/&lt;name&gt;.json</code>) holds everything that makes a channel <em>that</em> channel.
+The code has nothing niche-specific in it: a new niche is a new profile, no code changes.</p>
+<p>Included: <code>bible.json</code> (Bible stories) and <code>horror.json</code> (&quot;Midnight Tales&quot;, a worked second example).</p>
+<h2 id="creating-a-channel">Creating a channel<a class="anchor" href="#creating-a-channel" aria-label="Link to this section">#</a></h2>
+<ol>
+<li>Copy the closest profile: <code>cp channels/horror.json channels/history.json</code></li>
+<li>Edit every field (reference below). Take the most care over <code>story_rules</code> and <code>style</code>.</li>
+<li>Draft a test story: <code>python script.py --channel history --brief &quot;...&quot;</code></li>
+<li>Render it and look hard at the images before settling on <code>style</code> - after the first published
+video, treat <code>style</code> and <code>negative</code> as frozen.</li>
+</ol>
+<h2 id="field-reference">Field reference<a class="anchor" href="#field-reference" aria-label="Link to this section">#</a></h2>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Example (bible)</th>
+<th>What it controls</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>name</code></td>
+<td><code>&quot;bible&quot;</code></td>
+<td>Id. Must equal the file name. Stories point at it with <code>&quot;channel&quot;</code>.</td>
+</tr>
+<tr>
+<td><code>display_name</code></td>
+<td><code>&quot;Bible Stories&quot;</code></td>
+<td>Shown to the drafting model as the channel's name.</td>
+</tr>
+<tr>
+<td><code>language</code></td>
+<td><code>&quot;en&quot;</code></td>
+<td>Narration language (informational for now).</td>
+</tr>
+<tr>
+<td><code>narrator.persona</code></td>
+<td><code>&quot;a warm, unhurried storyteller...&quot;</code></td>
+<td>Who is telling the story.</td>
+</tr>
+<tr>
+<td><code>narrator.tone</code></td>
+<td><code>&quot;reverent but vivid and human; plain modern English...&quot;</code></td>
+<td>How it sounds.</td>
+</tr>
+<tr>
+<td><code>story_rules</code></td>
+<td>list of strings</td>
+<td>Content rules the draft must follow: faithfulness, rating, how to open, how to end. Sent to the model as-is.</td>
+</tr>
+<tr>
+<td><code>max_quotes</code></td>
+<td><code>1</code></td>
+<td>How many direct quotes a story may contain. <code>0</code> = never quote. Enforced by the validator.</td>
+</tr>
+<tr>
+<td><code>quote_translations</code></td>
+<td><code>[&quot;KJV&quot;, &quot;ASV&quot;, &quot;WEB&quot;]</code></td>
+<td>Allowed sources for quotes (public domain only). Enforced.</td>
+</tr>
+<tr>
+<td><code>passage_translation</code></td>
+<td><code>&quot;kjv&quot;</code></td>
+<td>bible-api.com translation id fetched for <code>--passage</code>.</td>
+</tr>
+<tr>
+<td><code>image_model</code></td>
+<td><code>&quot;flux2-klein&quot;</code></td>
+<td><code>flux2-klein</code> (FLUX.2 klein 4B) or <code>sdxl</code>. See <a href="images.html">images</a>.</td>
+</tr>
+<tr>
+<td><code>style</code></td>
+<td><code>&quot;biblical illustration, painterly digital art, ...&quot;</code></td>
+<td>Appended to every image prompt. <strong>The channel's visual brand.</strong></td>
+</tr>
+<tr>
+<td><code>negative</code></td>
+<td><code>&quot;text, watermark, logo, modern clothing, ...&quot;</code></td>
+<td>Negative prompt for every image (SDXL only; FLUX.2 klein has none).</td>
+</tr>
+<tr>
+<td><code>image_guidance</code></td>
+<td>list of strings</td>
+<td>Niche rules for the pictures, sent to the drafting model (period accuracy, what to keep unseen, ...).</td>
+</tr>
+<tr>
+<td><code>voice.engine</code></td>
+<td><code>&quot;kokoro&quot;</code></td>
+<td>TTS engine (only Kokoro so far).</td>
+</tr>
+<tr>
+<td><code>voice.id</code></td>
+<td><code>&quot;bm_george&quot;</code></td>
+<td>Kokoro voice. <code>python voice.py --voices</code> lists them. <code>a*</code> = American, <code>b*</code> = British.</td>
+</tr>
+<tr>
+<td><code>voice.speed</code></td>
+<td><code>0.95</code></td>
+<td>Speaking speed.</td>
+</tr>
+<tr>
+<td><code>voice.lang</code></td>
+<td><code>&quot;en-gb&quot;</code></td>
+<td>Pronunciation (defaults from the voice prefix).</td>
+</tr>
+<tr>
+<td><code>format</code></td>
+<td><code>&quot;short&quot;</code></td>
+<td><code>short</code> = 9:16 (1080x1920), <code>long</code> = 16:9 (1920x1080).</td>
+</tr>
+<tr>
+<td><code>target_duration_s</code></td>
+<td><code>55</code></td>
+<td>Sets the draft's word budget (~2.3 words/s) and the scene count (~9 s per scene). <code>voice.py</code> warns at +15%.</td>
+</tr>
+<tr>
+<td><code>motion</code></td>
+<td><code>{&quot;parallax&quot;: true, &quot;strength&quot;: 1.0, &quot;transition&quot;: &quot;fade&quot;, ...}</code></td>
+<td>Camera moves, parallax, crossfades, fades. See <a href="motion.html">motion</a>.</td>
+</tr>
+<tr>
+<td><code>music_mood</code></td>
+<td><code>&quot;gentle, reverent orchestral...&quot;</code></td>
+<td>A note to you for picking tracks for <code>music/&lt;name&gt;/</code>.</td>
+</tr>
+<tr>
+<td><code>music</code></td>
+<td><code>{&quot;pick&quot;: &quot;rotate&quot;, &quot;volume_db&quot;: -20, &quot;duck&quot;: true, ...}</code></td>
+<td>The channel's house mix: volume, ducking, fades, track rotation. See <a href="music.html">music</a>.</td>
+</tr>
+</tbody>
+</table></div>
+<h2 id="writing-good-story-rules">Writing good <code>story_rules</code><a class="anchor" href="#writing-good-story-rules" aria-label="Link to this section">#</a></h2>
+<ul>
+<li>Say what to do <em>and</em> what not to do: &quot;Retell faithfully... Do not invent events, dialogue,
+motives, names, numbers or doctrine.&quot;</li>
+<li>Give the hook rule explicitly (&quot;Open with a hook drawn from the story itself, not a question to
+the viewer&quot;).</li>
+<li>Give the ending rule (&quot;No sermon or moral at the end; a cliffhanger is fine for multi-part stories&quot;).</li>
+<li>State the rating and the hard lines (PG-13, no real crimes, no copyrighted characters).</li>
+</ul>
+<h2 id="writing-a-good-style">Writing a good <code>style</code><a class="anchor" href="#writing-a-good-style" aria-label="Link to this section">#</a></h2>
+<ul>
+<li>Medium + lighting + palette + setting: &quot;painterly digital art, warm cinematic lighting, rich
+earthy colours, ancient Middle East setting&quot;.</li>
+<li>No subject matter (that's the scene's job) and no artist names.</li>
+<li>Put era/genre leaks in <code>negative</code> (&quot;modern clothing, modern buildings&quot; for Bible; &quot;cute, bright
+cheerful colours&quot; for horror).</li>
+</ul>
+<h2 id="per-story-overrides">Per-story overrides<a class="anchor" href="#per-story-overrides" aria-label="Link to this section">#</a></h2>
+<p>A story may set <code>style</code>, <code>negative</code>, <code>format</code>, <code>voice</code>, <code>speed</code> or <code>music</code> to override its channel for
+that one video. Use sparingly: the point of a channel is consistency.</p>
+
+      </article>
+    </main>
+  </div>
+  <script>
+    const b = document.querySelector('.menu'), s = document.getElementById('sidebar');
+    b.addEventListener('click', () => { const o = s.classList.toggle('open'); b.setAttribute('aria-expanded', o); });
+  </script>
+</body>
+</html>

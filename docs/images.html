@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Images · Story pipeline docs</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <a class="skip" href="#content">Skip to content</a>
+  <header class="topbar">
+    <a class="brand" href="index.html">Story pipeline <span>docs</span></a>
+    <button class="menu" aria-expanded="false" aria-controls="sidebar">Menu</button>
+  </header>
+  <div class="layout">
+    <nav id="sidebar" class="sidebar" aria-label="Documentation">
+      <ul>
+      <li><a href="index.html">Overview & setup</a></li>
+      <li><a href="making-an-episode.html">Making an episode</a></li>
+      <li><a href="images.html" aria-current="page">Images</a></li>
+      <li><a href="motion.html">Motion</a></li>
+      <li><a href="music.html">Music</a></li>
+      <li><a href="channels.html">Channel profiles</a></li>
+      <li><a href="troubleshooting.html">Troubleshooting</a></li>
+      <li><a href="how-it-works.html">How it works</a></li>
+      </ul>
+      <p class="side-note">Agent instructions: <code>CLAUDE.md</code></p>
+    </nav>
+    <main id="content">
+      <nav class="toc" aria-label="On this page"><p>On this page</p><ul><li><a href="#image-models">Image models</a></li><li><a href="#how-a-shot-is-drafted">How a shot is drafted</a></li><li><a href="#checks-before-the-gpu">Checks (before the GPU)</a></li><li><a href="#fixing-an-image">Fixing an image</a></li></ul></nav>
+      <article>
+<h1 id="images">Images<a class="anchor" href="#images" aria-label="Link to this section">#</a></h1>
+<p>Images are most of what a viewer sees, so the pipeline puts as much design into them as into the
+narration: the drafting model plans each picture as a structured shot, the code composes the
+prompt, and per-model rules are checked before anything reaches the GPU.</p>
+<h2 id="image-models">Image models<a class="anchor" href="#image-models" aria-label="Link to this section">#</a></h2>
+<p>Set per channel with <code>&quot;image_model&quot;</code> in <code>channels/&lt;name&gt;.json</code> (a story can override it).</p>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th></th>
+<th><code>flux2-klein</code> (default)</th>
+<th><code>sdxl</code></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Model</td>
+<td>FLUX.2 klein 4B (Black Forest Labs, Apache 2.0)</td>
+<td>Stable Diffusion XL 1.0</td>
+</tr>
+<tr>
+<td>Prompt window</td>
+<td>512 tokens (Qwen3 text encoder) - full sentences</td>
+<td><strong>77 CLIP tokens</strong> - the rest is silently dropped</td>
+</tr>
+<tr>
+<td>Named characters per image</td>
+<td>up to 2</td>
+<td>1 (it blends faces)</td>
+</tr>
+<tr>
+<td>Negative prompt</td>
+<td>none (distilled, no CFG) - say it positively</td>
+<td>yes (channel <code>negative</code> + scene <code>avoid</code>)</td>
+</tr>
+<tr>
+<td>Steps</td>
+<td>4</td>
+<td>30</td>
+</tr>
+<tr>
+<td>On the T4</td>
+<td>bf16 (emulated) + CPU offload, ~13 GB</td>
+<td>fp16, fits easily</td>
+</tr>
+<tr>
+<td>Cache</td>
+<td><code>flux2-klein-cache</code>, ~16 GB</td>
+<td><code>sdxl-model-cache</code>, ~7 GB</td>
+</tr>
+</tbody>
+</table></div>
+<p>Each model is cached once on Kaggle by its own CPU-only notebook:</p>
+<pre><code class="language-bash">python run_kaggle.py --setup-model flux2-klein    # or: sdxl, or no name = every model the channels use
+</code></pre>
+<p><code>run_kaggle.py</code> only attaches the caches the approved stories need, and refuses to start if one
+is missing. One Kaggle job can render stories from channels on different models: <code>generate.py</code>
+groups them and loads each model once.</p>
+<h2 id="how-a-shot-is-drafted">How a shot is drafted<a class="anchor" href="#how-a-shot-is-drafted" aria-label="Link to this section">#</a></h2>
+<p>For each scene the drafting model (Gemini or Claude) fills a <code>shot</code>:</p>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Rule</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>subject</code></td>
+<td><code>{NAME}</code> placeholder(s) - never the description itself. Minor figures: short generic text.</td>
+</tr>
+<tr>
+<td><code>action</code></td>
+<td>A visible pose or action. No thoughts, plans, sounds or time passing.</td>
+</tr>
+<tr>
+<td><code>setting</code></td>
+<td>The place plus one or two concrete details.</td>
+</tr>
+<tr>
+<td><code>camera</code></td>
+<td>One of: extreme wide, wide, medium, medium close-up, close-up, extreme close-up, low-angle, high-angle, top-down, over-the-shoulder, silhouette. Never the same in two consecutive scenes; scene 1 is the hook/thumbnail.</td>
+</tr>
+<tr>
+<td><code>lighting</code></td>
+<td>Time of day and light quality, matching the mood.</td>
+</tr>
+<tr>
+<td>composition</td>
+<td>Written into the fields above: named characters in the foreground, sharp and large; crowds and guards in the background, smaller, soft-focus, in plain muted clothing that can't be mistaken for a named character - and only as many as the moment needs. FLUX also gets &quot;plain surfaces, no writing&quot; (it has no negative prompt to say &quot;no text&quot;).</td>
+</tr>
+<tr>
+<td><code>avoid</code></td>
+<td>SDXL: up to 3 things it tends to get wrong (&quot;beard&quot;) → the scene's <code>negative</code>. FLUX: always empty.</td>
+</tr>
+</tbody>
+</table></div>
+<p>The code composes <code>image_prompt</code> in priority order - who, doing what, where, framing, light - as
+comma phrases for SDXL and sentences for FLUX. The channel <code>style</code> is appended at render time.</p>
+<p>The channel's <code>image_guidance</code> (e.g. Bible: period-accurate clothing, no halos, violence implied)
+is sent with every draft.</p>
+<h2 id="checks-before-the-gpu">Checks (before the GPU)<a class="anchor" href="#checks-before-the-gpu" aria-label="Link to this section">#</a></h2>
+<p><code>common.image_problems()</code> - errors in <code>script.py</code> (the draft goes back to the model with the exact
+problem), warnings in <code>run_kaggle.py</code>:</p>
+<ul>
+<li>too many named characters in one image for the model;</li>
+<li>words a camera can't see (&quot;thinking&quot;, &quot;remembers&quot;, &quot;plans&quot;, ...);</li>
+<li>consecutive scenes with the same camera;</li>
+<li>character descriptions too long (SDXL: 20 CLIP tokens; FLUX: 40);</li>
+<li><strong>SDXL only:</strong> prompt + style over 75 CLIP tokens (counted exactly with <code>clip_tokens.py</code>, the same
+byte-pair encoding SDXL uses) and negative prompt over 75;</li>
+<li><strong>FLUX only:</strong> prompt + style over 300 words.</li>
+</ul>
+<p>Why the SDXL budget matters: before these checks, 4 of Joseph Part 2's 6 prompts overflowed, and
+what SDXL dropped was the channel style - so those images didn't look like the channel.</p>
+<h2 id="fixing-an-image">Fixing an image<a class="anchor" href="#fixing-an-image" aria-label="Link to this section">#</a></h2>
+<ul>
+<li>Re-roll: add <code>&quot;seed&quot;: 555</code> (any number) to the scene.</li>
+<li>Adjust the scene's <code>image_prompt</code> directly; keep <code>{NAME}</code> placeholders.</li>
+<li>A character looks wrong everywhere: tighten their entry in <code>characters</code> (most distinctive first).</li>
+<li>Then <code>python run_kaggle.py &lt;story&gt;</code>; <code>voice.py</code> is cached, so only <code>assemble.py</code> needs re-running.</li>
+</ul>
+
+      </article>
+    </main>
+  </div>
+  <script>
+    const b = document.querySelector('.menu'), s = document.getElementById('sidebar');
+    b.addEventListener('click', () => { const o = s.classList.toggle('open'); b.setAttribute('aria-expanded', o); });
+  </script>
+</body>
+</html>

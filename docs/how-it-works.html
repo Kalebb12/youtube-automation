@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>How it works (and why it&#x27;s built this way) · Story pipeline docs</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <a class="skip" href="#content">Skip to content</a>
+  <header class="topbar">
+    <a class="brand" href="index.html">Story pipeline <span>docs</span></a>
+    <button class="menu" aria-expanded="false" aria-controls="sidebar">Menu</button>
+  </header>
+  <div class="layout">
+    <nav id="sidebar" class="sidebar" aria-label="Documentation">
+      <ul>
+      <li><a href="index.html">Overview & setup</a></li>
+      <li><a href="making-an-episode.html">Making an episode</a></li>
+      <li><a href="images.html">Images</a></li>
+      <li><a href="motion.html">Motion</a></li>
+      <li><a href="music.html">Music</a></li>
+      <li><a href="channels.html">Channel profiles</a></li>
+      <li><a href="troubleshooting.html">Troubleshooting</a></li>
+      <li><a href="how-it-works.html" aria-current="page">How it works</a></li>
+      </ul>
+      <p class="side-note">Agent instructions: <code>CLAUDE.md</code></p>
+    </nav>
+    <main id="content">
+      
+      <article>
+<h1 id="how-it-works-and-why-it-s-built-this-way">How it works (and why it's built this way)<a class="anchor" href="#how-it-works-and-why-it-s-built-this-way" aria-label="Link to this section">#</a></h1>
+<pre><code>script.py ──▶ scenes/&lt;id&gt;.json (draft) ──you approve──▶ run_kaggle.py ──▶ Kaggle T4 (generate.py)
+                                                                              │
+          images/&lt;story&gt;/scene_XX.png ◀────────── kaggle kernels output ──────┘
+               ├─ voice.py    → images/&lt;story&gt;/audio/scene_XX.wav
+               └─ assemble.py → images/&lt;story&gt;/&lt;story&gt;.mp4
+</code></pre>
+<p>Each stage is its own script that reads and writes files, so any stage can be re-run alone.</p>
+<h2 id="design-decisions">Design decisions<a class="anchor" href="#design-decisions" aria-label="Link to this section">#</a></h2>
+<p><strong>Free by default.</strong> Images run on Kaggle's free GPU (~30 h/week), voice and video on the laptop
+CPU, drafts on Gemini's free tier. Claude is an opt-in paid alternative for drafting.</p>
+<p><strong>Channels are data, not code.</strong> Everything niche-specific lives in <code>channels/&lt;name&gt;.json</code>.
+<code>generate.py</code> gets each story's look from its channel; <code>voice.py</code> its voice; <code>script.py</code> its
+narrator and rules.</p>
+<p><strong>Human approval gate.</strong> Drafts are written as <code>&quot;status&quot;: &quot;draft&quot;</code>; only <code>&quot;approved&quot;</code> stories are
+uploaded to the GPU. Accuracy is the channel's moat, and a person reads every script.</p>
+<p><strong>Faithfulness is checked, not just requested.</strong> With <code>--passage</code>, any quoted text must appear
+word for word in the fetched passage; quotes must be in quotation marks and recorded in <code>quote</code>;
+the channel caps how many. Invalid drafts go back to the model with the problems listed.</p>
+<p><strong>Character consistency.</strong> Each person is described once in <code>characters</code> and referenced as
+<code>{NAME}</code> in prompts, so the wording - and so the look - is identical in every scene.
+<code>--continue-from</code> carries those descriptions across episodes, enforced in code.</p>
+<p><strong>Each image model is cached once on Kaggle.</strong> <code>kaggle_cache/cache_model.py</code> downloads only the
+files a model needs (FLUX.2 klein 4B ~16 GB; SDXL ~7 GB) as a CPU job and saves them as output -
+one cache notebook per model, because Kaggle caps a notebook's output at ~20 GB. Every image job attaches that output and runs Hugging Face offline,
+so no GPU time goes to downloads. <code>run_kaggle.py</code> refuses to start without the cache.</p>
+<p><strong>Images get as much design as the narration.</strong> The drafting model fills a structured shot per
+scene (subject, action, setting, camera, lighting) under per-model rules - see <a href="images.html">images</a>.</p>
+<p><strong>Pre-reading the weights.</strong> Kaggle mounts attached outputs lazily; loading SDXL via memory-mapped
+random reads took ~8 minutes. Reading each file sequentially first takes ~30 s.</p>
+<p><strong>Stories uploaded flat.</strong> Approved stories and <code>channel__&lt;name&gt;.json</code> profiles are staged in
+<code>.kaggle_upload/</code> and uploaded as one flat dataset (dataset uploads don't keep folders).
+<code>generate.py</code> checks every story's channel exists before loading the model.</p>
+<p><strong>Music is layered settings, not a file copy.</strong> Defaults &lt; channel <code>music</code> &lt; story <code>music</code> &lt; flags.
+Tracks are levelled to one loudness before <code>volume_db</code> applies, ducked under the narration with a
+sidechain compressor, and rotated per story (stable on re-runs).</p>
+<p><strong>Stills that move.</strong> <code>motion.py</code> estimates depth per image (small ONNX model on CPU, cached) and
+renders an eased camera move where near things shift against the background; <code>assemble.py</code>
+crossfades the scene clips with ffmpeg <code>xfade</code> and fades the ends. Free, no GPU.</p>
+<p><strong>Narration timing drives the video.</strong> Each scene lasts exactly as long as its narration plus a
+short pause; subtitles are timed from the same durations, split into short chunks.</p>
+<p><strong>Narration is read from <code>scenes/</code></strong>, not from the copy rendered with the images, so text fixes
+never need the GPU. The stages warn when image prompts changed after rendering.</p>
+<h2 id="file-map">File map<a class="anchor" href="#file-map" aria-label="Link to this section">#</a></h2>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>Path</th>
+<th>What</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>channels/*.json</code></td>
+<td>channel profiles</td>
+</tr>
+<tr>
+<td><code>scenes/*.json</code></td>
+<td>stories (source of truth)</td>
+</tr>
+<tr>
+<td><code>script.py</code></td>
+<td>stage 0: draft with Gemini/Claude, validate, retry</td>
+</tr>
+<tr>
+<td><code>run_kaggle.py</code></td>
+<td>stage 1 controller: stage approved stories, upload, run, download</td>
+</tr>
+<tr>
+<td><code>kaggle_sd/generate.py</code></td>
+<td>runs on Kaggle: images per scene (FLUX.2 klein or SDXL, grouped by model)</td>
+</tr>
+<tr>
+<td><code>clip_tokens.py</code></td>
+<td>exact CLIP token counting for SDXL's 77-token window</td>
+</tr>
+<tr>
+<td><code>kaggle_cache/cache_model.py</code></td>
+<td>runs on Kaggle once: model cache</td>
+</tr>
+<tr>
+<td><code>voice.py</code></td>
+<td>stage 2: Kokoro TTS</td>
+</tr>
+<tr>
+<td><code>assemble.py</code></td>
+<td>stage 3: FFmpeg video</td>
+</tr>
+<tr>
+<td><code>motion.py</code></td>
+<td>depth parallax + camera moves, frames piped to ffmpeg</td>
+</tr>
+<tr>
+<td><code>music.py</code></td>
+<td>music tools (list / preview / set) + the mix used by <code>assemble.py</code></td>
+</tr>
+<tr>
+<td><code>common.py</code></td>
+<td>shared: <code>.env</code>, channels, validation, story loading, ffmpeg helpers</td>
+</tr>
+<tr>
+<td><code>images/</code>, <code>models/</code>, <code>music/</code>, <code>.env</code>, <code>.kaggle_upload/</code></td>
+<td>local only (gitignored)</td>
+</tr>
+</tbody>
+</table></div>
+
+      </article>
+    </main>
+  </div>
+  <script>
+    const b = document.querySelector('.menu'), s = document.getElementById('sidebar');
+    b.addEventListener('click', () => { const o = s.classList.toggle('open'); b.setAttribute('aria-expanded', o); });
+  </script>
+</body>
+</html>

@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Story video pipeline (Kaggle free GPU + your laptop + Gemini or Claude) · Story pipeline docs</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <a class="skip" href="#content">Skip to content</a>
+  <header class="topbar">
+    <a class="brand" href="index.html">Story pipeline <span>docs</span></a>
+    <button class="menu" aria-expanded="false" aria-controls="sidebar">Menu</button>
+  </header>
+  <div class="layout">
+    <nav id="sidebar" class="sidebar" aria-label="Documentation">
+      <ul>
+      <li><a href="index.html" aria-current="page">Overview & setup</a></li>
+      <li><a href="making-an-episode.html">Making an episode</a></li>
+      <li><a href="images.html">Images</a></li>
+      <li><a href="motion.html">Motion</a></li>
+      <li><a href="music.html">Music</a></li>
+      <li><a href="channels.html">Channel profiles</a></li>
+      <li><a href="troubleshooting.html">Troubleshooting</a></li>
+      <li><a href="how-it-works.html">How it works</a></li>
+      </ul>
+      <p class="side-note">Agent instructions: <code>CLAUDE.md</code></p>
+    </nav>
+    <main id="content">
+      <nav class="toc" aria-label="On this page"><p>On this page</p><ul><li><a href="#one-time-setup">One-time setup</a></li><li><a href="#0-draft-a-story-script-py">0. Draft a story — script.py</a></li><li><a href="#1-images-run-kaggle-py">1. Images — run_kaggle.py</a></li><li><a href="#2-narration-voice-py-3-video-assemble-py">2. Narration — voice.py  ·  3. Video — assemble.py</a></li><li><a href="#story-file">Story file</a></li><li><a href="#new-channel-niche">New channel / niche</a></li></ul></nav>
+      <article>
+<h1 id="story-video-pipeline-kaggle-free-gpu-your-laptop-gemini-or-claude">Story video pipeline (Kaggle free GPU + your laptop + Gemini or Claude)<a class="anchor" href="#story-video-pipeline-kaggle-free-gpu-your-laptop-gemini-or-claude" aria-label="Link to this section">#</a></h1>
+<p>Brief in, narrated YouTube Short out. Drafts come from Gemini (free) or Claude (paid).
+Works for any niche: each channel is a profile in <code>channels/</code> (<code>bible.json</code> and <code>horror.json</code> included).</p>
+<pre><code>python script.py --channel bible --passage &quot;Daniel 3:13-28&quot; --brief &quot;the fiery furnace&quot; # 0. draft
+#   read scenes/&lt;id&gt;.json, fix it, set &quot;status&quot;: &quot;approved&quot;                              #    YOU review
+python run_kaggle.py                                                                     # 1. images (Kaggle GPU)
+python voice.py                                                                          # 2. narration (laptop)
+python assemble.py                                                                       # 3. video (laptop)
+</code></pre>
+<p>Final video: <code>images/&lt;story&gt;/&lt;story&gt;.mp4</code>.</p>
+<p><strong>Guides:</strong> <a href="making-an-episode.html">making an episode</a> ·
+<a href="images.html">images</a> · <a href="channels.html">channel profiles</a> · <a href="motion.html">motion</a> · <a href="music.html">music</a> · <a href="troubleshooting.html">troubleshooting</a> ·
+<a href="how-it-works.html">how it works</a></p>
+<h2 id="one-time-setup">One-time setup<a class="anchor" href="#one-time-setup" aria-label="Link to this section">#</a></h2>
+<ol>
+<li>Create an account at kaggle.com.</li>
+<li><strong>Verify your phone number</strong>: Settings -&gt; Phone verification. (GPU and internet don't work without this.)</li>
+<li>Settings -&gt; API -&gt; <strong>Create New Token</strong>. This downloads <code>kaggle.json</code>.</li>
+<li>Put the token where the Kaggle tool looks for it:
+<ul>
+<li>Windows: <code>C:\Users\&lt;you&gt;\.kaggle\kaggle.json</code></li>
+<li>Mac/Linux: <code>~/.kaggle/kaggle.json</code> then run <code>chmod 600 ~/.kaggle/kaggle.json</code></li>
+</ul>
+</li>
+<li>Install everything: <code>pip install -r requirements.txt</code> (and <code>sudo apt install ffmpeg</code> if you don't have it)</li>
+<li>Check it works: <code>kaggle kernels list --mine</code> (should print without errors)</li>
+<li><strong>Cache the image model on Kaggle (once):</strong> <code>python run_kaggle.py --setup-model</code>
+A CPU-only Kaggle job (no GPU hours) downloads only the files the channels' image model needs
+(FLUX.2 klein 4B: ~16 GB; SDXL: ~7 GB) and saves them as its output. Never needed again unless
+you add a model.</li>
+<li><strong>Drafting model (pick one or both):</strong>
+<ul>
+<li>Gemini (free): create a key at https://aistudio.google.com/apikey and put <code>GEMINI_API_KEY=...</code> in <code>.env</code></li>
+<li>Claude (paid, ~$0.05-0.10 per draft): <code>ant auth login</code>, or <code>ANTHROPIC_API_KEY=...</code> in <code>.env</code>;
+add <code>LLM_PROVIDER=claude</code> to <code>.env</code> to make it the default
+<code>.env</code> is gitignored. Never commit it.</li>
+</ul>
+</li>
+</ol>
+<h2 id="0-draft-a-story-script-py">0. Draft a story — <code>script.py</code><a class="anchor" href="#0-draft-a-story-script-py" aria-label="Link to this section">#</a></h2>
+<pre><code>python script.py --channel bible  --passage &quot;Genesis 37:1-11&quot; --brief &quot;Joseph's dreams, part 1&quot;
+python script.py --channel horror --brief &quot;a lighthouse keeper hears knocking from below the floor&quot;
+python script.py --channel horror --brief &quot;retell this faithfully&quot; --source-file my_tale.txt
+</code></pre>
+<p>The model writes <code>scenes/&lt;id&gt;.json</code> in the channel's narrator voice: hook first, storytelling
+narration (not verse-by-verse), one image prompt per scene with <code>{CHARACTER}</code> placeholders,
+and a <code>characters</code> block. Length comes from the channel's <code>target_duration_s</code>.</p>
+<ul>
+<li><code>--passage</code> fetches the KJV text from bible-api.com; the draft must retell it faithfully, and
+any quoted words are checked word for word against it (the Bible channel allows one quote).</li>
+<li>Bad drafts (unknown characters, misquotes, too many quotes, too long...) are sent back with the
+problems listed, up to 3 tries.</li>
+<li><strong>Series:</strong> <code>--continue-from joseph_part1</code> reuses the previous episode's characters word for word
+(so Joseph looks the same) and tells the model what already happened. Use it for every part after the first.</li>
+<li>Options: <code>--provider claude|gemini</code>, <code>--id my_story</code>, <code>--scenes 6</code>, <code>--model &lt;name&gt;</code>
+(<code>--list-models [--provider claude]</code> shows yours). Drafts over the channel's length are sent back to shorten.</li>
+</ul>
+<p><strong>Review step (required):</strong> open the file, check every fact against the source, edit freely,
+then change <code>&quot;status&quot;: &quot;draft&quot;</code> to <code>&quot;status&quot;: &quot;approved&quot;</code>. <code>script.py</code> won't overwrite an approved
+story without <code>--force</code>.</p>
+<h2 id="1-images-run-kaggle-py">1. Images — <code>run_kaggle.py</code><a class="anchor" href="#1-images-run-kaggle-py" aria-label="Link to this section">#</a></h2>
+<pre><code>python run_kaggle.py                 # every approved story
+python run_kaggle.py joseph_part1    # just these (must be approved)
+python run_kaggle.py --download      # re-download the last finished run
+</code></pre>
+<ul>
+<li>Only <code>&quot;status&quot;: &quot;approved&quot;</code> stories are uploaded; drafts are listed as skipped. With nothing
+approved, nothing is sent to Kaggle. Approved stories are validated first.</li>
+<li>The channel profiles go up with them, so each story gets its channel's look (<code>style</code>/<code>negative</code>).</li>
+<li>Refuses to start if the model cache doesn't exist (run <code>--setup-model</code> first).</li>
+<li>FLUX.2 klein on the free T4: ~90 s to load, ~90 s per image (6 scenes ≈ 10 min). Images land in
+<code>images/&lt;story&gt;/</code>.</li>
+</ul>
+<h2 id="2-narration-voice-py-3-video-assemble-py">2. Narration — <code>voice.py</code>  ·  3. Video — <code>assemble.py</code><a class="anchor" href="#2-narration-voice-py-3-video-assemble-py" aria-label="Link to this section">#</a></h2>
+<pre><code>python voice.py [story]              # -&gt; images/&lt;story&gt;/audio/scene_XX.wav
+python assemble.py [story]           # -&gt; images/&lt;story&gt;/&lt;story&gt;.mp4
+</code></pre>
+<ul>
+<li>Voice and speed come from the channel profile (<code>voice.py --voices</code> lists Kokoro voices;
+<code>--voice am_michael</code> to try one). First run downloads the voice model (~350 MB) once.</li>
+<li>Narration is cached and read from <code>scenes/</code>, so fixing a typo doesn't need a GPU re-run.</li>
+<li>Each image stays up exactly as long as its narration as a slow camera move with <strong>depth parallax</strong>
+(near things move against the background), <strong>crossfading</strong> into the next, with a fade in from and
+out to black, and burned-in subtitles. Tune with <code>--strength</code>, <code>--transition</code>, <code>--flat</code>. See <a href="motion.html">motion</a>.</li>
+<li><strong>Music:</strong> put royalty-free tracks in <code>music/&lt;channel&gt;/</code> (mood sub-folders optional). Each story
+gets a track from the pool, levelled and ducked under the narration. Audition in seconds with
+<code>python music.py preview &lt;story&gt; --track x.mp3 --volume-db -16</code>, save with <code>music.py set</code>.
+See <a href="music.html">music</a>.</li>
+</ul>
+<h2 id="story-file">Story file<a class="anchor" href="#story-file" aria-label="Link to this section">#</a></h2>
+<pre><code class="language-json">{
+  &quot;story&quot;: &quot;joseph_part1&quot;, &quot;channel&quot;: &quot;bible&quot;, &quot;title&quot;: &quot;...&quot;, &quot;status&quot;: &quot;approved&quot;,
+  &quot;source&quot;: {&quot;passage&quot;: &quot;Genesis 37&quot;, &quot;translation&quot;: &quot;KJV&quot;},
+  &quot;characters&quot;: {&quot;JOSEPH&quot;: &quot;a beardless 17-year-old ... robe of many colours&quot;},
+  &quot;scenes&quot;: [
+    {&quot;id&quot;: 1, &quot;refs&quot;: [&quot;Genesis 37:3&quot;], &quot;narration&quot;: &quot;...&quot;,
+     &quot;quote&quot;: {&quot;text&quot;: &quot;a coat of many colours&quot;, &quot;ref&quot;: &quot;Genesis 37:3&quot;, &quot;translation&quot;: &quot;KJV&quot;},
+     &quot;image_prompt&quot;: &quot;{JOSEPH} holding up a beautiful new coat ...&quot;, &quot;seed&quot;: 555}
+  ]
+}
+</code></pre>
+<ul>
+<li>Describe each person once in <code>characters</code>; use <code>{NAME}</code> in prompts so they look the same every scene.
+Keep to one or two characters per image (one on SDXL, which blends people together).</li>
+<li>Images use the channel's <code>image_model</code>: <code>flux2-klein</code> (FLUX.2 klein 4B, default) or <code>sdxl</code>.</li>
+<li>Add <code>&quot;seed&quot;: 555</code> to a scene to re-roll just that image.</li>
+<li>A story can override its channel's <code>motion</code>, <code>image_model</code>, <code>style</code>, <code>negative</code>, <code>format</code>, <code>voice</code>, <code>speed</code>, <code>music</code>.</li>
+<li>Direct quotes must be public-domain (KJV/ASV/WEB for Bible), in quotation marks, and listed in <code>quote</code>.</li>
+</ul>
+<h2 id="new-channel-niche">New channel / niche<a class="anchor" href="#new-channel-niche" aria-label="Link to this section">#</a></h2>
+<p>Copy <code>channels/horror.json</code> to <code>channels/&lt;name&gt;.json</code> and edit: narrator persona and tone, story
+rules, quote policy, image <code>style</code> + <code>negative</code>, voice, format, target length, music mood.
+Then <code>python script.py --channel &lt;name&gt; --brief &quot;...&quot;</code>. No code changes needed.
+Pick the <code>style</code> once and leave it — it's the channel's visual brand.</p>
+
+      </article>
+    </main>
+  </div>
+  <script>
+    const b = document.querySelector('.menu'), s = document.getElementById('sidebar');
+    b.addEventListener('click', () => { const o = s.classList.toggle('open'); b.setAttribute('aria-expanded', o); });
+  </script>
+</body>
+</html>
