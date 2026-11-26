@@ -4,28 +4,29 @@ Runs ON YOUR LAPTOP (CPU). Step 3: images + narration -> finished video.
 Reads   images/<story>/scene_XX.png, images/<story>/audio/scene_XX.wav (from voice.py)
 Writes  images/<story>/<story>.mp4
 
-Each scene is shown for exactly as long as its narration, with a slow zoom
-(alternating in/out). Subtitles are timed from the narration lengths and burned in.
-Format comes from the channel profile (story "format" overrides). Background music,
-if any, is taken from music/<channel>/ first, then music/, and mixed quietly under the voice.
+Each scene is shown for exactly as long as its narration, as a slow eased camera move with
+depth parallax (see motion.py), crossfading into the next scene; the video fades in from and
+out to black. Subtitles are timed from the narration and burned in. Format comes from the
+channel profile (story "format" overrides). Background music comes from music/<channel>/
+(see music.py for tracks, moods, volume, ducking, previews).
 
 Usage:
     python assemble.py                      # every story in images/
     python assemble.py joseph_part1         # just one
-    python assemble.py --music music/calm.mp3
+    python assemble.py joseph_part1 --track calm.mp3 --volume-db -16 --start 10
     python assemble.py --no-music
+    python assemble.py --flat               # no depth parallax (plain Ken Burns)
+    python assemble.py --transition dissolve --transition-s 1.0
 """
 import argparse, glob, os, shutil, sys, textwrap
-from common import HERE, duration, load_story, run, story_dirs, story_setting
-
-MUSIC_DIR = os.path.join(HERE, "music")
+import motion
+import music as bgm
+from common import SCENE_LEAD_IN as LEAD_IN, SCENE_TAIL as TAIL
+from common import duration, load_story, run, story_dirs, story_setting
 
 # ---------- Look (keep fixed so every video matches) ----------
 FPS = 30
 SIZES = {"short": (1080, 1920), "long": (1920, 1080)}
-LEAD_IN, TAIL = 0.35, 0.65        # silence before/after each scene's narration (s)
-ZOOM = 0.10                       # how far the slow zoom travels (10%)
-MUSIC_VOLUME = 0.12               # background music level under the voice
 SUB_FONT = "DejaVu Serif"
 WORDS_PER_CAPTION = {"short": 6, "long": 10}
 
@@ -40,7 +41,14 @@ def ass_time(t):
 def captions(text, start, length, words_per):
     """Split narration into short chunks, timed by their share of the characters."""
     words = text.split()
-    chunks = [" ".join(words[i:i + words_per]) for i in range(0, len(words), words_per)]
+    # even chunks (13 words at 6 per caption -> 5+4+4, never a lone trailing word)
+    n = max(1, -(-len(words) // words_per))
+    size, extra = divmod(len(words), n)
+    chunks, i = [], 0
+    for k in range(n):
+        step = size + (1 if k < extra else 0)
+        chunks.append(" ".join(words[i:i + step]))
+        i += step
     total = sum(len(c) for c in chunks) or 1
     t, out = start, []
     for c in chunks:
@@ -74,48 +82,32 @@ def write_ass(path, events, w, h, fmt):
 
 
 # ---------- Video ----------
-def scene_clip(img, wav, length, w, h, idx, out):
-    """Image -> clip of `length` seconds with a slow zoom, narration on top."""
-    frames = max(1, round(length * FPS))
-    big_w, big_h = w * 2, h * 2       # upscale first so zoompan's pixel steps don't jitter
-    z = f"1+{ZOOM}*on/{frames}" if idx % 2 == 0 else f"{1 + ZOOM}-{ZOOM}*on/{frames}"
-    vf = (f"scale={big_w}:{big_h}:force_original_aspect_ratio=increase,crop={big_w}:{big_h},"
-          f"zoompan=z='{z}':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d={frames}:s={w}x{h}:fps={FPS},"
-          f"format=yuv420p")
-    af = f"adelay={int(LEAD_IN * 1000)}:all=1,apad,atrim=0:{length:.3f}"
-    run(["ffmpeg", "-y", "-loop", "1", "-framerate", str(FPS), "-i", img, "-i", wav,
-         "-vf", vf, "-af", af, "-t", f"{length:.3f}",
-         "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-r", str(FPS),
-         "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "2", out])
-
-
-def pick_music(channel_name):
-    """First audio file in music/<channel>/, else in music/, else None."""
-    for d in (os.path.join(MUSIC_DIR, channel_name), MUSIC_DIR):
-        files = sorted(f for f in glob.glob(os.path.join(d, "*"))
-                       if f.lower().endswith((".mp3", ".wav", ".m4a", ".ogg")))
-        if files:
-            return files[0]
-    return None
-
-
-def assemble_story(story_dir, music, use_music=True):
+def assemble_story(story_dir, music_overrides=None, use_music=True, motion_overrides=None):
     story, channel = load_story(story_dir)
     sid = os.path.basename(story_dir)
     fmt = story_setting(story, channel, "format", "short")
-    if use_music and not music:
-        music = pick_music(channel["name"])
-        if not music and channel.get("music_mood"):
-            print(f"  (no music: add a track to music/{channel['name']}/ - mood: {channel['music_mood']})")
-    if music:
-        print(f"  music: {music}")
+    mov = motion.resolve(story, channel)
+    mov.update({k: v for k, v in (motion_overrides or {}).items() if v is not None})
+    mix = bgm.resolve(story, channel, music_overrides)
+    track = bgm.pick_track(mix, channel["name"], story["story"]) if use_music else None
     w, h = SIZES[fmt]
     work = os.path.join(story_dir, ".work")
     os.makedirs(work, exist_ok=True)
 
     print(f"\n=== {sid} [{channel['name']}]: {len(story['scenes'])} scenes, {fmt} {w}x{h} ===")
-    clips, events, t = [], [], 0.0
-    for i, s in enumerate(story["scenes"]):
+    print(f"  motion: parallax {'on' if mov['parallax'] else 'off'} (strength {mov['strength']}), "
+          f"{mov['transition']} {mov['transition_s']}s, fade in {mov['fade_in']}s / out {mov['fade_out']}s")
+    if track:
+        print(f"  music: {bgm.describe(mix, track)}")
+    elif use_music and mix.get("track") != "none":
+        print(f"  (no music: add tracks to music/{channel['name']}/"
+              + (f" - mood: {channel['music_mood']})" if channel.get("music_mood") else ")"))
+
+    scenes = story["scenes"]
+    n = len(scenes)
+    T = max(0.0, float(mov["transition_s"])) if n > 1 else 0.0
+    lengths, events, t = [], [], 0.0
+    for s in scenes:
         img = os.path.join(story_dir, f"scene_{s['id']:02d}.png")
         wav = os.path.join(story_dir, "audio", f"scene_{s['id']:02d}.wav")
         if not os.path.exists(img):
@@ -123,47 +115,73 @@ def assemble_story(story_dir, music, use_music=True):
         if not os.path.exists(wav):
             sys.exit(f"Missing narration {wav} - run python voice.py {sid} first")
         speech = duration(wav)
-        length = LEAD_IN + speech + TAIL
-        clip = os.path.join(work, f"scene_{s['id']:02d}.mp4")
-        scene_clip(img, wav, length, w, h, i, clip)
-        clips.append(clip)
+        lengths.append(LEAD_IN + speech + TAIL)
         events += captions(s["narration"], t + LEAD_IN, speech, WORDS_PER_CAPTION[fmt])
-        t += length
-        print(f"  scene {s['id']:02d}: {length:4.1f}s")
+        t += lengths[-1]
+    total = t
 
-    listfile = os.path.join(work, "list.txt")
-    with open(listfile, "w") as f:
-        f.writelines(f"file '{c}'\n" for c in clips)
-    joined = os.path.join(work, "joined.mp4")
-    run(["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", listfile, "-c", "copy", joined])
+    # 1. one silent moving clip per scene; all but the last run T longer to overlap the crossfade
+    clips = []
+    for i, (s, length) in enumerate(zip(scenes, lengths)):
+        img = os.path.join(story_dir, f"scene_{s['id']:02d}.png")
+        depth = None
+        if mov["parallax"]:
+            depth = motion.depth_map(img, os.path.join(story_dir, "depth", f"scene_{s['id']:02d}.npy"))
+        move = motion.move_for(s, i)
+        clip = os.path.join(work, f"scene_{s['id']:02d}.mp4")
+        motion.render_clip(img, depth, clip, w, h, length + (T if i < n - 1 else 0), FPS, move, mov)
+        clips.append(clip)
+        print(f"  scene {s['id']:02d}: {length:4.1f}s  {move}", flush=True)
 
+    # 2. narration on the same timeline (identical gaps), as one track
+    voice = os.path.join(work, "voice.wav")
+    bgm.narration_track(story_dir, story, voice)
+
+    # 3. crossfades -> fades -> subtitles, + narration (+ music), one final encode
     ass = os.path.join(work, "subs.ass")
     write_ass(ass, events, w, h, fmt)
-    out = os.path.join(story_dir, f"{sid}.mp4")
-    sub_filter = f"subtitles='{ass}'"
-    cmd = ["ffmpeg", "-y", "-i", joined]
-    if music:
-        cmd += ["-stream_loop", "-1", "-i", music,
-                "-filter_complex",
-                f"[0:v]{sub_filter}[v];"
-                f"[1:a]volume={MUSIC_VOLUME},afade=t=out:st={max(0, t - 2):.2f}:d=2[m];"
-                f"[0:a][m]amix=inputs=2:duration=first:normalize=0,loudnorm=I=-16:TP=-1.5[a]",
-                "-map", "[v]", "-map", "[a]"]
+    cmd = ["ffmpeg", "-y"]
+    for c in clips:
+        cmd += ["-i", c]
+    cmd += ["-i", voice]
+    vi = len(clips)                                   # input index of the narration
+    graph, last, offset = [], "[0:v]", 0.0
+    for i in range(1, n):
+        offset += lengths[i - 1]
+        graph.append(f"{last}[{i}:v]xfade=transition={mov['transition']}:duration={T:.3f}:"
+                     f"offset={offset:.3f}[x{i}]")
+        last = f"[x{i}]"
+    fo = min(float(mov["fade_out"]), total / 3)
+    graph.append(f"{last}settb=AVTB,fps={FPS},fade=t=in:st=0:d={float(mov['fade_in']):.2f},"
+                 f"fade=t=out:st={total - fo:.3f}:d={fo:.2f},subtitles='{ass}',format=yuv420p[v]")
+    if track:
+        inputs, chain = bgm.mix_args(mix, track, total, f"[{vi}:a]", vi + 1)
+        cmd += inputs
+        graph.append(chain)
     else:
-        cmd += ["-vf", sub_filter, "-af", "loudnorm=I=-16:TP=-1.5"]
-    cmd += ["-t", f"{t:.3f}", "-c:v", "libx264", "-preset", "medium", "-crf", "20",
+        graph.append(f"[{vi}:a]loudnorm=I=-16:TP=-1.5[a]")
+    out = os.path.join(story_dir, f"{sid}.mp4")
+    cmd += ["-filter_complex", ";".join(graph), "-map", "[v]", "-map", "[a]", "-t", f"{total:.3f}",
+            "-c:v", "libx264", "-preset", "medium", "-crf", "20", "-r", str(FPS),
             "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-movflags", "+faststart", out]
     run(cmd)
     shutil.rmtree(work, ignore_errors=True)
-    print(f"  -> {out}  ({t:.1f}s)")
+    print(f"  -> {out}  ({total:.1f}s)")
 
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("stories", nargs="*", help="story names (default: all in images/)")
-    ap.add_argument("--music", help="background music file (default: music/<channel>/ then music/)")
-    ap.add_argument("--no-music", action="store_true")
+    bgm.add_mix_flags(ap)
+    ap.add_argument("--music", dest="track", help=argparse.SUPPRESS)   # old name for --track
+    ap.add_argument("--no-music", action="store_true", help="no background music")
+    ap.add_argument("--flat", action="store_true", help="no depth parallax (plain Ken Burns)")
+    ap.add_argument("--strength", type=float, help="parallax strength (1.0 default)")
+    ap.add_argument("--transition", help="crossfade style: fade, dissolve, fadeblack, smoothleft, circleopen, ...")
+    ap.add_argument("--transition-s", type=float, help="crossfade length (s)")
     args = ap.parse_args()
 
+    mo = {"parallax": False if args.flat else None, "strength": args.strength,
+          "transition": args.transition, "transition_s": args.transition_s}
     for d in story_dirs(args.stories):
-        assemble_story(d, args.music, use_music=not args.no_music)
+        assemble_story(d, bgm.overrides_from(args), use_music=not args.no_music, motion_overrides=mo)

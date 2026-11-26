@@ -55,9 +55,20 @@ on Kaggle, and if needed open the notebook on kaggle.com → Settings → Intern
 **Model load takes ~8 minutes** - `/kaggle/input` is fetched lazily; `generate.py` pre-reads the
 weights sequentially first (~30 s). Don't remove that block.
 
-**Two people blended into one face / Joseph has a beard** - SDXL mixes described people. Give each
-image one main subject; make descriptions distinct ("beardless", "smooth youthful face"); re-roll
-with a `seed`.
+**Two people blended into one face / Joseph has a beard** - SDXL mixes described people (FLUX.2
+klein much less). Give each image one main subject; make descriptions distinct ("beardless",
+"smooth youthful face"); re-roll with a `seed`.
+
+**`truncated because CLIP can only handle sequences up to 77 tokens`** (SDXL) - the prompt was too
+long and the end (the channel style) was dropped. `script.py` prevents this for new drafts;
+`run_kaggle.py` warns about old ones.
+
+**`prompt + style is N CLIP tokens, limit 75`** - shorten the shot or the character description.
+
+**`Model cache not found ... flux2-klein`** - `python run_kaggle.py --setup-model flux2-klein` once.
+
+**FLUX.2 klein is slow** - the T4 has no native bf16, so it's emulated; 4 steps keep it bearable.
+**`WARNING scene_XX.png is black`** - numeric overflow; tell Claude, the dtype may need changing.
 
 **Black images** - fp16 VAE overflow; the pipeline uses `madebyollin/sdxl-vae-fp16-fix` for this.
 
@@ -72,6 +83,22 @@ with a `seed`.
 `run_kaggle.py` if you want the images to match.
 
 **`WARNING: Ns over target`** - the narration is longer than the channel's target; trim it.
+
+**`(no music: add tracks to music/<channel>/ ...)`** - the pool is empty; the video is narration
+only. `python music.py list` shows what's found where.
+
+**`Music track not found`** - a story's `track` names a file that isn't in `music/<channel>/`,
+its mood folder, or `music/`. Fix the name or `python music.py set <story> --clear`.
+
+**Music too loud / too quiet** - change `volume_db` (story or channel), audition with
+`python music.py preview <story> --volume-db -22`. Tracks are levelled first, so the same number
+works for any track.
+
+**Warping / smeared edges around people** - parallax too strong for that image. Lower it:
+`"motion": {"strength": 0.6}` in the story, or `python assemble.py <story> --strength 0.6`, or `--flat`.
+
+**Depth looks wrong after replacing an image** - the cache is keyed on the file's size and time;
+delete `images/<story>/depth/` to force a recompute.
 
 **Voice model download stalls** - the model files come from GitHub releases; delete the partial
 file in `models/` and run again (or download with `curl -C -` to resume).

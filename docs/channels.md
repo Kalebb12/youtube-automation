@@ -26,15 +26,19 @@ Included: `bible.json` (Bible stories) and `horror.json` ("Midnight Tales", a wo
 | `max_quotes` | `1` | How many direct quotes a story may contain. `0` = never quote. Enforced by the validator. |
 | `quote_translations` | `["KJV", "ASV", "WEB"]` | Allowed sources for quotes (public domain only). Enforced. |
 | `passage_translation` | `"kjv"` | bible-api.com translation id fetched for `--passage`. |
+| `image_model` | `"flux2-klein"` | `flux2-klein` (FLUX.2 klein 4B) or `sdxl`. See [images](images.md). |
 | `style` | `"biblical illustration, painterly digital art, ..."` | Appended to every image prompt. **The channel's visual brand.** |
-| `negative` | `"text, watermark, logo, modern clothing, ..."` | SDXL negative prompt for every image. |
+| `negative` | `"text, watermark, logo, modern clothing, ..."` | Negative prompt for every image (SDXL only; FLUX.2 klein has none). |
+| `image_guidance` | list of strings | Niche rules for the pictures, sent to the drafting model (period accuracy, what to keep unseen, ...). |
 | `voice.engine` | `"kokoro"` | TTS engine (only Kokoro so far). |
 | `voice.id` | `"bm_george"` | Kokoro voice. `python voice.py --voices` lists them. `a*` = American, `b*` = British. |
 | `voice.speed` | `0.95` | Speaking speed. |
 | `voice.lang` | `"en-gb"` | Pronunciation (defaults from the voice prefix). |
 | `format` | `"short"` | `short` = 9:16 (1080x1920), `long` = 16:9 (1920x1080). |
 | `target_duration_s` | `55` | Sets the draft's word budget (~2.3 words/s) and the scene count (~9 s per scene). `voice.py` warns at +15%. |
+| `motion` | `{"parallax": true, "strength": 1.0, "transition": "fade", ...}` | Camera moves, parallax, crossfades, fades. See [motion](motion.md). |
 | `music_mood` | `"gentle, reverent orchestral..."` | A note to you for picking tracks for `music/<name>/`. |
+| `music` | `{"pick": "rotate", "volume_db": -20, "duck": true, ...}` | The channel's house mix: volume, ducking, fades, track rotation. See [music](music.md). |
 
 ## Writing good `story_rules`
 
@@ -55,5 +59,5 @@ Included: `bible.json` (Bible stories) and `horror.json` ("Midnight Tales", a wo
 
 ## Per-story overrides
 
-A story may set `style`, `negative`, `format`, `voice` or `speed` to override its channel for
+A story may set `style`, `negative`, `format`, `voice`, `speed` or `music` to override its channel for
 that one video. Use sparingly: the point of a channel is consistency.

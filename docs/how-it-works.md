@@ -30,10 +30,13 @@ the channel caps how many. Invalid drafts go back to the model with the problems
 `{NAME}` in prompts, so the wording - and so the look - is identical in every scene.
 `--continue-from` carries those descriptions across episodes, enforced in code.
 
-**The model is cached once on Kaggle.** `kaggle_cache/cache_model.py` downloads only the SDXL
-files we use (~7 GB: fp16 UNet, text encoders, tokenizers, configs + the fp16-fix VAE) as a CPU
-job and saves them as output. Every image job attaches that output and runs Hugging Face offline,
+**Each image model is cached once on Kaggle.** `kaggle_cache/cache_model.py` downloads only the
+files a model needs (FLUX.2 klein 4B ~16 GB; SDXL ~7 GB) as a CPU job and saves them as output -
+one cache notebook per model, because Kaggle caps a notebook's output at ~20 GB. Every image job attaches that output and runs Hugging Face offline,
 so no GPU time goes to downloads. `run_kaggle.py` refuses to start without the cache.
+
+**Images get as much design as the narration.** The drafting model fills a structured shot per
+scene (subject, action, setting, camera, lighting) under per-model rules - see [images](images.md).
 
 **Pre-reading the weights.** Kaggle mounts attached outputs lazily; loading SDXL via memory-mapped
 random reads took ~8 minutes. Reading each file sequentially first takes ~30 s.
@@ -41,6 +44,14 @@ random reads took ~8 minutes. Reading each file sequentially first takes ~30 s.
 **Stories uploaded flat.** Approved stories and `channel__<name>.json` profiles are staged in
 `.kaggle_upload/` and uploaded as one flat dataset (dataset uploads don't keep folders).
 `generate.py` checks every story's channel exists before loading the model.
+
+**Music is layered settings, not a file copy.** Defaults < channel `music` < story `music` < flags.
+Tracks are levelled to one loudness before `volume_db` applies, ducked under the narration with a
+sidechain compressor, and rotated per story (stable on re-runs).
+
+**Stills that move.** `motion.py` estimates depth per image (small ONNX model on CPU, cached) and
+renders an eased camera move where near things shift against the background; `assemble.py`
+crossfades the scene clips with ffmpeg `xfade` and fades the ends. Free, no GPU.
 
 **Narration timing drives the video.** Each scene lasts exactly as long as its narration plus a
 short pause; subtitles are timed from the same durations, split into short chunks.
@@ -56,9 +67,12 @@ never need the GPU. The stages warn when image prompts changed after rendering.
 | `scenes/*.json` | stories (source of truth) |
 | `script.py` | stage 0: draft with Gemini/Claude, validate, retry |
 | `run_kaggle.py` | stage 1 controller: stage approved stories, upload, run, download |
-| `kaggle_sd/generate.py` | runs on Kaggle: SDXL images per scene |
+| `kaggle_sd/generate.py` | runs on Kaggle: images per scene (FLUX.2 klein or SDXL, grouped by model) |
+| `clip_tokens.py` | exact CLIP token counting for SDXL's 77-token window |
 | `kaggle_cache/cache_model.py` | runs on Kaggle once: model cache |
 | `voice.py` | stage 2: Kokoro TTS |
 | `assemble.py` | stage 3: FFmpeg video |
+| `motion.py` | depth parallax + camera moves, frames piped to ffmpeg |
+| `music.py` | music tools (list / preview / set) + the mix used by `assemble.py` |
 | `common.py` | shared: `.env`, channels, validation, story loading, ffmpeg helpers |
 | `images/`, `models/`, `music/`, `.env`, `.kaggle_upload/` | local only (gitignored) |

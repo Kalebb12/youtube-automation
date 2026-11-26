@@ -22,8 +22,15 @@
     "WEB"
   ],
   "passage_translation": "kjv",
+  "image_model": "flux2-klein",
   "style": "biblical illustration, painterly digital art, warm cinematic lighting, ancient Middle East setting, rich earthy colours, detailed, soft volumetric light",
   "negative": "text, watermark, logo, signature, modern clothing, modern buildings, blurry, low quality, deformed hands, extra fingers, extra limbs, distorted face",
+  "image_guidance": [
+    "Period-accurate ancient Near East only: robes, tunics, head cloths, sandals, tents, stone, clay, flocks; nothing modern.",
+    "No halos, glowing auras, angels or depictions of God unless the passage describes a visible appearance.",
+    "Modest clothing for everyone; violence implied, never shown (no blood, no wounds).",
+    "Show emotion through posture and faces: a clenched jaw, a turned back, hands raised."
+  ],
   "voice": {
     "engine": "kokoro",
     "id": "bm_george",
@@ -31,6 +38,22 @@
     "lang": "en-gb"
   },
   "format": "short",
+  "motion": {
+    "parallax": true,
+    "strength": 1.0,
+    "zoom": 0.08,
+    "transition": "fade",
+    "transition_s": 0.7,
+    "fade_in": 0.6,
+    "fade_out": 1.2
+  },
   "target_duration_s": 55,
-  "music_mood": "gentle, reverent orchestral or ambient strings; no vocals"
+  "music_mood": "gentle, reverent orchestral or ambient strings; no vocals",
+  "music": {
+    "pick": "rotate",
+    "volume_db": -20,
+    "fade_in": 2,
+    "fade_out": 3,
+    "duck": true
+  }
 }

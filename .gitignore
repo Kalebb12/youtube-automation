@@ -19,3 +19,4 @@ scenes/dataset-metadata.json
 # Secrets
 kaggle.json
 .env
+.kaggle_cache/

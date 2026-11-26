@@ -3,7 +3,8 @@ Runs ON YOUR LAPTOP. Uploads APPROVED stories in ./scenes (plus the channel prof
 in ./channels) to Kaggle, starts the GPU job, waits for it, and downloads the images.
 
 Usage:
-    python run_kaggle.py --setup-model   # ONE TIME: cache the SDXL model on Kaggle (~7 GB)
+    python run_kaggle.py --setup-model   # ONE TIME per model: cache the image models the channels use
+    python run_kaggle.py --setup-model flux2-klein    # (or a specific one: sdxl | flux2-klein)
     python run_kaggle.py                 # all approved stories: upload, run, download
     python run_kaggle.py joseph_part1    # only these (must be approved)
     python run_kaggle.py --download      # just download the latest finished run
@@ -11,7 +12,7 @@ Usage:
 Stories with "status": "draft" are skipped - review them and set "status": "approved".
 """
 import argparse, glob, json, os, re, shutil, subprocess, sys, time
-from common import CHANNELS_DIR, validate_story
+from common import CHANNELS_DIR, IMAGE_MODELS, image_model, image_problems, load_channel, validate_story
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SCENES_DIR = os.path.join(HERE, "scenes")
@@ -20,8 +21,10 @@ IMAGES_DIR = os.path.join(HERE, "images")
 UPLOAD_DIR = os.path.join(HERE, ".kaggle_upload")   # rebuilt each run; what the dataset contains
 DATASET_SLUG = "bible-scenes"
 KERNEL_SLUG = "bible-scene-generator"
-CACHE_DIR = os.path.join(HERE, "kaggle_cache")
-CACHE_SLUG = "sdxl-model-cache"
+CACHE_SRC = os.path.join(HERE, "kaggle_cache", "cache_model.py")
+CACHE_BUILD = os.path.join(HERE, ".kaggle_cache")   # one generated notebook folder per model
+CACHE_SLUGS = {"sdxl": "sdxl-model-cache", "flux2-klein": "flux2-klein-cache"}
+CACHE_SIZES = {"sdxl": "~7 GB, ~10 min", "flux2-klein": "~16 GB, ~15-25 min"}
 CACHE_MARKER = "CACHE_OK.json"
 
 
@@ -78,6 +81,9 @@ def stage_upload(names):
             bad.append((sid, errs))
         else:
             approved.append((sid, path))
+            # Not blocking (it's approved), but worth knowing before spending GPU time
+            for w in image_problems(story, load_channel(story["channel"])):
+                print(f"  WARNING {sid}: {w}")
     if skipped:
         print(f"Skipping drafts (not approved): {', '.join(skipped)}")
     if bad:
@@ -98,7 +104,18 @@ def stage_upload(names):
     return [sid for sid, _ in approved]
 
 
-def write_metadata(user):
+def models_for(story_ids):
+    """Image models needed by these stories (story override, else channel profile)."""
+    out = []
+    for sid in story_ids:
+        story = json.load(open(os.path.join(SCENES_DIR, f"{sid}.json")))
+        m = image_model(story, load_channel(story["channel"]))
+        if m not in out:
+            out.append(m)
+    return out
+
+
+def write_metadata(user, models=()):
     os.makedirs(UPLOAD_DIR, exist_ok=True)
     json.dump({"title": DATASET_SLUG, "id": f"{user}/{DATASET_SLUG}",
                "licenses": [{"name": "CC0-1.0"}]},
@@ -106,53 +123,65 @@ def write_metadata(user):
     json.dump({"id": f"{user}/{KERNEL_SLUG}", "title": KERNEL_SLUG,
                "code_file": "generate.py", "language": "python", "kernel_type": "script",
                "is_private": True, "enable_gpu": True, "enable_internet": True,
-               "dataset_sources": [f"{user}/{DATASET_SLUG}"],
-               "competition_sources": [], "kernel_sources": [f"{user}/{CACHE_SLUG}"]},
+               "dataset_sources": [f"{user}/{DATASET_SLUG}"], "competition_sources": [],
+               "kernel_sources": [f"{user}/{CACHE_SLUGS[m]}" for m in models]},
               open(os.path.join(KERNEL_DIR, "kernel-metadata.json"), "w"), indent=2)
-    # The cache job only downloads files: internet on, GPU off (saves GPU quota)
-    json.dump({"id": f"{user}/{CACHE_SLUG}", "title": CACHE_SLUG,
+
+
+def write_cache_notebook(user, model):
+    """A folder with cache_model.py (MODEL line set) + metadata. CPU only: it just downloads."""
+    d = os.path.join(CACHE_BUILD, model)
+    os.makedirs(d, exist_ok=True)
+    src = open(CACHE_SRC).read()
+    src, n = re.subn(r'^MODEL = ".*?"', f'MODEL = "{model}"', src, count=1, flags=re.M)
+    assert n == 1, "cache_model.py lost its MODEL line"
+    open(os.path.join(d, "cache_model.py"), "w").write(src)
+    json.dump({"id": f"{user}/{CACHE_SLUGS[model]}", "title": CACHE_SLUGS[model],
                "code_file": "cache_model.py", "language": "python", "kernel_type": "script",
                "is_private": True, "enable_gpu": False, "enable_internet": True,
                "dataset_sources": [], "competition_sources": [], "kernel_sources": []},
-              open(os.path.join(CACHE_DIR, "kernel-metadata.json"), "w"), indent=2)
+              open(os.path.join(d, "kernel-metadata.json"), "w"), indent=2)
+    return d
 
 
-def cache_ready(user):
-    """True if the cache job finished and its output contains the CACHE_OK.json marker."""
-    r = subprocess.run([KAGGLE, "kernels", "files", f"{user}/{CACHE_SLUG}",
+def cache_ready(user, model):
+    """True if that model's cache job finished and its output contains CACHE_OK.json."""
+    r = subprocess.run([KAGGLE, "kernels", "files", f"{user}/{CACHE_SLUGS[model]}",
                         "--page-size", "200", "-v"], capture_output=True, text=True)
     return r.returncode == 0 and CACHE_MARKER in r.stdout
 
 
-def require_cache(user):
-    if cache_ready(user):
-        print("Model cache found.")
+def require_cache(user, models):
+    missing = [m for m in models if not cache_ready(user, m)]
+    if not missing:
+        print(f"Model cache found: {', '.join(models)}")
         return
-    ref = f"{user}/{CACHE_SLUG}"
-    status = subprocess.run([KAGGLE, "kernels", "status", ref],
-                            capture_output=True, text=True).stdout.strip()
-    sys.exit("Model cache not found, so the GPU job was NOT started.\n"
-             f"  Cache job status: {status or 'not created yet'}\n"
-             "  Run once:  python run_kaggle.py --setup-model\n"
-             "  (If it's still running, wait for it to finish and try again.)")
+    lines = []
+    for m in missing:
+        status = subprocess.run([KAGGLE, "kernels", "status", f"{user}/{CACHE_SLUGS[m]}"],
+                                capture_output=True, text=True).stdout.strip()
+        lines.append(f"  {m}: {status or 'not created yet'}  ->  python run_kaggle.py --setup-model {m}")
+    sys.exit("Model cache not found, so the GPU job was NOT started.\n" + "\n".join(lines) +
+             "\n  (If a cache job is still running, wait for it to finish and try again.)")
 
 
-def setup_model(user):
-    if cache_ready(user):
-        print("Model cache already exists - nothing to do. (Re-running would just rebuild it.)")
+def setup_model(user, model):
+    if cache_ready(user, model):
+        print(f"{model}: cache already exists - nothing to do.")
         return
-    sh(KAGGLE, "kernels", "push", "-p", CACHE_DIR)
-    print("Cache job started (CPU only, ~10-20 min to download ~7 GB).")
+    d = write_cache_notebook(user, model)
+    sh(KAGGLE, "kernels", "push", "-p", d)
+    print(f"{model}: cache job started (CPU only, {CACHE_SIZES[model]}).")
     time.sleep(20)
-    wait_for_kernel(f"{user}/{CACHE_SLUG}")
+    wait_for_kernel(f"{user}/{CACHE_SLUGS[model]}")
     print("Waiting for Kaggle to publish the output...")
     for _ in range(20):
-        if cache_ready(user):
-            print("Model cache ready. Now run:  python run_kaggle.py")
+        if cache_ready(user, model):
+            print(f"{model}: cache ready.")
             return
         time.sleep(15)
     sys.exit(f"Job finished but {CACHE_MARKER} isn't in its output - "
-             f"check the log at kaggle.com/code/{user}/{CACHE_SLUG}")
+             f"check the log at kaggle.com/code/{user}/{CACHE_SLUGS[model]}")
 
 
 def upload_scenes(user):
@@ -207,20 +236,26 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("stories", nargs="*", help="only these approved stories (default: all approved)")
     ap.add_argument("--download", action="store_true", help="only download the last run")
-    ap.add_argument("--setup-model", action="store_true",
-                    help="one-time: download the SDXL model on Kaggle and save it as a cache")
+    ap.add_argument("--setup-model", nargs="?", const="__channels__", choices=list(IMAGE_MODELS) + ["__channels__"],
+                    metavar="MODEL", help="one-time: cache an image model on Kaggle "
+                    f"({' | '.join(IMAGE_MODELS)}; default: every model the channels use)")
     args = ap.parse_args()
 
     user = username()
     if args.setup_model:
-        write_metadata(user)
-        setup_model(user)
+        wanted = [args.setup_model] if args.setup_model != "__channels__" else sorted(
+            {load_channel(os.path.splitext(os.path.basename(p))[0]).get("image_model", "sdxl")
+             for p in glob.glob(os.path.join(CHANNELS_DIR, "*.json"))})
+        for m in wanted:
+            setup_model(user, m)
+        print("Now run:  python run_kaggle.py")
         sys.exit(0)
     if not args.download:
         stories = stage_upload(args.stories)      # refuses before touching Kaggle if none approved
-        write_metadata(user)
-        print(f"Stories to generate: {', '.join(stories)}")
-        require_cache(user)
+        models = models_for(stories)
+        write_metadata(user, models)
+        print(f"Stories to generate: {', '.join(stories)}  (models: {', '.join(models)})")
+        require_cache(user, models)
         upload_scenes(user)
         sh(KAGGLE, "kernels", "push", "-p", KERNEL_DIR)
         print("GPU job started (model loads from the cache, ~1-2 min).")

@@ -32,11 +32,11 @@ script.py  ── Gemini / Claude ─────▶ scenes/<id>.json  "status":
 run_kaggle.py ── approved stories + channels/*.json ──▶ bible-scenes dataset
               ── kaggle kernels push ─────────────────▶ bible-scene-generator (T4)
                                                           ├─ attaches bible-scenes
-                                                          ├─ attaches sdxl-model-cache output
+                                                          ├─ attaches <model>-cache output(s)
                                                           └─ writes /kaggle/working/<story>/*.png
 images/<story>/ ◀── kaggle kernels output ────────────────┘
       ├─▶ voice.py     Kokoro TTS (CPU)        → images/<story>/audio/scene_XX.wav
-      ├─▶ assemble.py  FFmpeg zoom + subtitles → images/<story>/<story>.mp4
+      ├─▶ assemble.py  parallax moves + crossfades + subtitles + music → images/<story>/<story>.mp4
       └─▶ [next] upload
 ```
 
@@ -53,11 +53,14 @@ saves outputs, shuts down. GPU quota (~30 h/week) is only spent while running.
 | `channels/<name>.json` | — | Channel profile: narrator persona/tone, story rules, quote policy, image `style`/`negative`, voice, format, target duration, music mood. |
 | `script.py` | laptop | Stage 0. Gemini or Claude (`--provider`, schema-constrained JSON) drafts `scenes/<id>.json` from a brief, optional `--passage` (KJV via bible-api.com), `--source-file`, `--continue-from <prev episode>`. Validates (incl. word budget); retries with the errors. |
 | `run_kaggle.py` | laptop | Controller. Stages **approved** stories + channel profiles, uploads, pushes the GPU job, polls, downloads. No AI here. |
-| `kaggle_sd/generate.py` | Kaggle GPU | Loads SDXL from the cache, renders every scene with its channel's style. |
-| `kaggle_cache/cache_model.py` | Kaggle CPU | One-time job: downloads SDXL (~7 GB) and saves it as job output for reuse. |
+| `kaggle_sd/generate.py` | Kaggle GPU | Groups stories by image model (`flux2-klein` / `sdxl`), loads each once from its cache, renders every scene with its channel's style. |
+| `kaggle_cache/cache_model.py` | Kaggle CPU | One-time job **per model**: downloads only the files that model needs (FLUX.2 klein ~16 GB, SDXL ~7 GB) and saves them as job output. `run_kaggle.py` pushes a copy with the `MODEL` line set as `<model>-cache`. |
+| `clip_tokens.py` | laptop | Exact CLIP token counter (stdlib BPE + SDXL's merges.txt) for SDXL's 77-token window. |
 | `voice.py` | laptop | Kokoro TTS (kokoro-onnx, CPU) per scene, voice from the profile. Cached by text+voice+speed. |
-| `assemble.py` | laptop | FFmpeg: slow zoom per image, burned-in subtitles, optional music, loudness-normalised mp4. |
-| `common.py` | laptop | Shared: `.env` loading, channel loading, story schema validation, story loading, ffmpeg helpers. |
+| `assemble.py` | laptop | Per scene a silent moving clip (`motion.py`), xfade crossfades, fade in/out, burned-in subtitles, narration + music (`music.py`), loudness-normalised mp4. |
+| `motion.py` | laptop | Depth parallax (Depth Anything V2 Small, ONNX, CPU; cached per image) + eased camera moves, frames piped into ffmpeg. |
+| `music.py` | laptop | Music: track pool/moods/rotation, layered mix settings, ducking. CLI: `list`, `preview` (audio-only, ~20 s), `set`. |
+| `common.py` | laptop | Shared: `.env` loading, channel loading, story schema validation, story loading, scene timing constants, ffmpeg helpers. |
 | `scenes/*.json` | — | Stories. Source of truth for narration. |
 | `images/` | — | All outputs per story: images, `audio/`, final mp4. Gitignored. |
 | `models/`, `music/` | — | Kokoro model (~350 MB, auto-downloaded); royalty-free music in `music/<channel>/`. Gitignored. |
@@ -75,11 +78,12 @@ python script.py --provider claude --channel bible --passage "Genesis 37:25-36" 
     --continue-from joseph_part2 --brief "Joseph part 3: sold to the Ishmeelites"
 python script.py --channel horror --brief "a lighthouse keeper hears knocking from below"
 #   → read scenes/<id>.json, fix it, set "status": "approved"
-python run_kaggle.py --setup-model       # ONE TIME: cache the model on Kaggle
+python run_kaggle.py --setup-model [flux2-klein|sdxl]   # ONE TIME per model: cache it on Kaggle
 python run_kaggle.py [story ...]         # approved stories → generate → download
 python run_kaggle.py --download          # re-download the last finished run
 python voice.py [story]                  # narration → images/<story>/audio/
 python assemble.py [story]               # → images/<story>/<story>.mp4
+python music.py list | preview <story> | set <story> [--track f.mp3 --volume-db -16 --start 10 --no-duck]
 python script.py --list-models [--provider claude]   # if a default model is retired
 kaggle kernels status <user>/bible-scene-generator   # check a job manually
 ```
@@ -97,11 +101,15 @@ Logs for a failed run: kaggle.com → Your Work → Code → `bible-scene-genera
 | `story_rules` | script.py | content rules the draft must follow (faithfulness, rating, hooks, endings) |
 | `max_quotes`, `quote_translations` | script.py, validation | how many direct quotes a story may contain, from which public-domain texts |
 | `passage_translation` | script.py | translation fetched for `--passage` (bible-api.com id, e.g. `kjv`) |
-| `style`, `negative` | generate.py | SDXL style suffix and negative prompt — **the channel's visual brand** |
+| `image_model` | generate.py, script.py, checks | `flux2-klein` (default for both channels) or `sdxl` |
+| `style`, `negative` | generate.py | style appended to every prompt (and SDXL-only negative prompt) — **the channel's visual brand** |
+| `image_guidance` | script.py | niche rules for the pictures (period accuracy, what stays unseen, ...) |
 | `voice.engine/id/speed/lang` | voice.py | TTS voice (only `kokoro` for now) |
 | `format` | generate.py, assemble.py | `short` (9:16) or `long` (16:9) |
 | `target_duration_s` | script.py, voice.py | word budget for drafts; warning if narration runs long |
+| `motion` | motion.py, assemble.py | `parallax`, `strength`, `zoom`, `transition` (xfade name), `transition_s`, `fade_in`, `fade_out` |
 | `music_mood` | assemble.py (hint) | what to put in `music/<channel>/` |
+| `music` | music.py, assemble.py | house mix: `pick` (rotate/first), `volume_db`, `fade_in`/`fade_out`, `duck`, `start`, `mood`, `track` |
 
 Adding a niche = adding a profile. Code changes should never hard-code a niche.
 
@@ -132,7 +140,13 @@ Adding a niche = adding a profile. Code changes should never hard-code a niche.
 - `previous` (set by `--continue-from`) names the prior episode. Recurring characters keep the
   prior episode's exact description - that's what makes a series look like one series. Use
   `--continue-from` for every episode after the first.
-- Optional per-story overrides of the profile: `style`, `negative`, `format`, `voice`, `speed`.
+- Scenes are drafted as a structured `shot` (subject, action, setting, camera, lighting, avoid) and
+  composed into `image_prompt` in priority order; on SDXL `avoid` becomes the scene's `negative`.
+- A scene may pin its camera move: `"move": "zoom_in" | "zoom_out" | "pan_left" | "pan_right"`
+  (default: that cycle, so neighbours never match).
+- Optional per-story overrides of the profile: `image_model`, `motion`, `style`, `negative`, `format`, `voice`, `speed`,
+  `music` (same keys as the profile's `music`; `"track": "none"` = silent). Precedence:
+  defaults < channel `music` < story `music` < `assemble.py` flags.
 - `common.validate_story()` is the schema. `script.py` and `run_kaggle.py` both enforce it.
 - `voice.py`/`assemble.py` read narration from `scenes/` (not the copy in `images/`), so
   narration edits don't need a GPU re-run. They warn if image prompts changed since render.
@@ -167,13 +181,26 @@ Never flip a story to `approved` on the user's behalf.
 - A profile's `style` and `negative` are that channel's brand. Don't change them
   casually: it breaks visual consistency across episodes. Ask first.
 
+**Image models**
+- **FLUX.2 klein 4B** (`flux2-klein`, default): 4 distilled steps, `guidance_scale=1.0`, bf16 +
+  `enable_model_cpu_offload()` (transformer 7.8 GB + Qwen3 text encoder 8 GB don't fit one T4 together).
+  512-token prompts, natural language. **No negative prompt** - write avoidances positively.
+  Up to 2 named characters per image. Supports reference images (`image=`) - not used yet.
+- **SDXL** (`sdxl`): fp16, 30 steps, VAE slicing on (`pipe.vae.enable_slicing()`; the pipeline-level
+  `enable_vae_slicing()` was removed from diffusers). **77-token CLIP window**: everything past it is
+  silently dropped (the style goes last, so it's what gets lost). `script.py` budgets prompts exactly
+  with `clip_tokens.py`; 1 named character per image; character descriptions ≤ 20 tokens.
+- `common.image_problems()` holds the per-model rules (`MODEL_RULES`); `script.py` treats them as
+  errors (retry), `run_kaggle.py` as warnings.
+
 **Kaggle / GPU**
-- Target hardware is a **T4 (16 GB, fp16, no bf16)**. Keep pipelines in `float16`,
-  keep VAE slicing on (`pipe.vae.enable_slicing()`; the pipeline-level
-  `enable_vae_slicing()` was removed from diffusers), and test anything bigger than SDXL for memory first.
-- Load the model **once** per job and batch all stories through it.
-- Never download weights inside `generate.py` in the normal path. Cache them via a
-  `kaggle_cache` job and attach with `kernel_sources`. `HF_HUB_OFFLINE=1` enforces this.
+- Target hardware is a **T4 (16 GB, no native bf16)**. Test anything bigger than FLUX.2 klein 4B for
+  memory first.
+- Load each model **once** per job and batch all its stories through it (`generate.py` groups by model).
+- Never download weights inside `generate.py` in the normal path. Cache them via the
+  `<model>-cache` job and attach with `kernel_sources` (only the models the approved stories need).
+  `HF_HUB_OFFLINE=1` enforces this. Kaggle job output is capped at ~20 GB per notebook, so one
+  cache notebook per model.
 - Only files in `/kaggle/working/` come back to the laptop.
 - `/kaggle/input` is fetched lazily; `generate.py` pre-reads the weights sequentially before
   loading (8 min → ~30 s). Don't remove that.
@@ -195,11 +222,15 @@ Never flip a story to `approved` on the user's behalf.
 - GPU or internet errors on Kaggle: the account's phone number isn't verified.
 - Dataset "not ready": Kaggle needs a minute after upload. `upload_scenes()` waits for it.
 - Black images: fp16 VAE overflow. That's why we use `madebyollin/sdxl-vae-fp16-fix`.
-- Faces drift / characters blend: SDXL merges people in one image. Prefer one character
-  per image; tighten `characters` before reaching for IP-Adapter or LoRAs.
+- Faces drift / characters blend: SDXL merges people in one image (FLUX.2 copes with two). Prefer
+  one character per image; tighten `characters` before reaching for reference images or LoRAs.
+- SDXL log line `truncated because CLIP can only handle sequences up to 77 tokens`: the prompt
+  overflowed - the style was lost. `common.image_problems()` catches this before rendering.
 - Gemini 404: the default model was retired. `python script.py --list-models`, then
   `--model <name>` or `GEMINI_MODEL=<name>` in `.env`. 429/503 = free tier busy; `script.py`
   retries for ~2 min, then use `--provider claude`.
+- Music: tracks are loudness-levelled before `volume_db`, so never "fix" a quiet track by
+  editing the file. Keep `music/` gitignored; only royalty-free tracks (channels are monetized).
 - Claude: default `claude-opus-5-5` (`CLAUDE_MODEL` to change), effort `high`, server-side
   refusal fallback on. Don't send `temperature` (rejected on current Claude models).
 
@@ -207,12 +238,17 @@ Never flip a story to `approved` on the user's behalf.
 
 - [x] Image generation on Kaggle with cached model
 - [x] `voice.py`: Kokoro TTS per scene → `images/<story>/audio/scene_XX.wav`
-- [x] `assemble.py`: Ken Burns motion + music bed (FFmpeg) — crossfades not yet
+- [x] `assemble.py`: depth-parallax camera moves, crossfades, fade in/out, music bed
+- [x] Music tools: pools/moods/rotation, levelling, ducking, fades, `music.py preview`/`set`
 - [x] Captions: burned-in subtitles, timed from TTS durations (Whisper word timings would be tighter)
 - [x] Channel profiles; `script.py` drafts stories (Gemini or Claude); draft → approved gate
 - [x] Series continuity: `--continue-from` reuses characters across episodes
 - [ ] Upload via YouTube Data API (private by default, human approves publish)
-- [ ] Try Z-Image Turbo vs SDXL on the Joseph story
+- [x] Image model switch: FLUX.2 klein 4B (per-channel `image_model`, per-model caches); SDXL kept
+- [x] Image-focused drafting: structured shots, per-model budgets/rules, channel `image_guidance`
+- [ ] Character reference images with FLUX.2 klein (`image=`) for cross-episode faces
+- [ ] Wan2.2 image-to-video for the hook scene only (TI2V-5B needs ~24 GB even offloaded; T4 has 16 GB - test first)
+- [ ] Try Z-Image Turbo (needs fp32→fp16 conversion: 33 GB repo exceeds the 20 GB cache limit)
 - [ ] Narration in Nigerian Pidgin / Yoruba / Igbo
 
 **The human review step is not optional.** Every script gets read before it renders

@@ -6,6 +6,7 @@ SCENES_DIR = os.path.join(HERE, "scenes")
 IMAGES_DIR = os.path.join(HERE, "images")
 CHANNELS_DIR = os.path.join(HERE, "channels")
 
+SCENE_LEAD_IN, SCENE_TAIL = 0.35, 0.65   # silence before/after each scene's narration (s)
 STATUSES = ("draft", "approved")
 FORMATS = ("short", "long")
 CHAR_NAME = re.compile(r"^[A-Z][A-Z0-9_]*$")
@@ -129,6 +130,8 @@ def validate_story(story, source_text=None):
                 errs.append(f"{where}: '{k}' is missing or empty")
         if not isinstance(s.get("refs", []), list):
             errs.append(f"{where}: 'refs' must be a list")
+        if "negative" in s and not isinstance(s["negative"], str):
+            errs.append(f"{where}: 'negative' must be a string")
         if "seed" in s and not isinstance(s["seed"], int):
             errs.append(f"{where}: 'seed' must be an integer")
         if isinstance(s.get("narration"), str) and PLACEHOLDER.search(s["narration"]):
@@ -155,9 +158,112 @@ def validate_story(story, source_text=None):
             errs.append(f"{where}: quoted text must be inside quotation marks in the narration")
         if source_text is not None and _norm(q["text"]) not in _norm(source_text):
             errs.append(f"{where}: quote is not word-for-word from the source passage: \"{q['text']}\"")
+    if "image_model" in story and story["image_model"] not in IMAGE_MODELS:
+        errs.append(f"'image_model' must be one of {IMAGE_MODELS}")
+    if channel.get("image_model", "sdxl") not in IMAGE_MODELS:
+        errs.append(f"channel '{channel['name']}' has unknown image_model '{channel.get('image_model')}'")
+    mo = story.get("motion")
+    if mo is not None:
+        known = {"parallax": bool, "strength": (int, float), "zoom": (int, float), "transition": str,
+                 "transition_s": (int, float), "fade_in": (int, float), "fade_out": (int, float)}
+        if not isinstance(mo, dict):
+            errs.append("'motion' must be an object")
+        else:
+            for k, v in mo.items():
+                if k not in known:
+                    errs.append(f"motion: unknown setting '{k}' (known: {', '.join(known)})")
+                elif not isinstance(v, known[k]) or (known[k] is not bool and isinstance(v, bool)):
+                    errs.append(f"motion: '{k}' has the wrong type")
+    for sc in story["scenes"]:
+        if isinstance(sc, dict) and sc.get("move") not in (None, "zoom_in", "zoom_out", "pan_left", "pan_right"):
+            errs.append(f"scene {sc.get('id')}: 'move' must be zoom_in, zoom_out, pan_left or pan_right")
+    m = story.get("music")
+    if m is not None:
+        if not isinstance(m, dict):
+            errs.append("'music' must be an object")
+        else:
+            known = {"track": str, "mood": str, "pick": str, "volume_db": (int, float), "start": (int, float),
+                     "fade_in": (int, float), "fade_out": (int, float), "duck": bool}
+            for k, v in m.items():
+                if k not in known:
+                    errs.append(f"music: unknown setting '{k}' (known: {', '.join(known)})")
+                elif not isinstance(v, known[k]) or (known[k] is not bool and isinstance(v, bool)):
+                    errs.append(f"music: '{k}' has the wrong type")
+            if m.get("pick") not in (None, "rotate", "first"):
+                errs.append("music: 'pick' must be 'rotate' or 'first'")
     max_q = int(channel.get("max_quotes", 0))
     if quotes > max_q:
         errs.append(f"{quotes} quotes, but channel '{channel['name']}' allows at most {max_q}")
+    return errs
+
+
+# ---------- Image models and prompt checks ----------
+IMAGE_MODELS = ("sdxl", "flux2-klein")
+# Per model: max characters named in one image, max character-description length (CLIP tokens),
+# whether the 75-CLIP-token window applies, whether negative prompts work.
+MODEL_RULES = {
+    "sdxl":        {"max_chars": 1, "char_max_tokens": 20, "clip_window": True,  "negatives": True},
+    "flux2-klein": {"max_chars": 2, "char_max_tokens": 40, "clip_window": False, "negatives": False},
+}
+CHAR_MAX_TOKENS = MODEL_RULES["sdxl"]["char_max_tokens"]
+FLUX_MAX_WORDS = 300         # FLUX.2 reads 512 tokens; keep well inside it
+NOT_DRAWABLE = ("thinking", "thinks", "remembers", "remembering", "realizes", "realising", "realizing",
+                "decides", "plans", "planning", "intends", "hopes", "wonders", "feels", "imagines",
+                "symbolizing", "symbolising", "representing", "meanwhile", "later", "years pass")
+
+
+def full_prompt(scene, story, channel):
+    """The positive prompt exactly as generate.py sends it."""
+    return f"{filled_prompt(scene, story)}, {story.get('style', channel['style'])}"
+
+
+def full_negative(scene, story, channel):
+    neg = story.get("negative", channel["negative"])
+    return f"{neg}, {scene['negative']}" if scene.get("negative") else neg
+
+
+def image_model(story, channel):
+    """The image model for a story: story override, else the channel profile, else sdxl."""
+    return story.get("image_model") or channel.get("image_model", "sdxl")
+
+
+def image_problems(story, channel, new_characters=None):
+    """Problems that make images worse, for the story's image model. On SDXL, prompts past 75
+    CLIP tokens are silently cut - and the channel style, which goes last, is what gets lost.
+    `new_characters`: names whose description length should be enforced (default: all)."""
+    import clip_tokens as ct
+    model = image_model(story, channel)
+    rules = MODEL_RULES.get(model, MODEL_RULES["sdxl"])
+    errs = []
+    chars = story.get("characters", {})
+    for name in (chars if new_characters is None else new_characters):
+        if name in chars and ct.count(chars[name]) > rules["char_max_tokens"]:
+            errs.append(f"character {name}: description is {ct.count(chars[name])} CLIP tokens, max "
+                        f"{rules['char_max_tokens']} - keep only the most distinctive visual tags")
+    for s in story.get("scenes", []):
+        where = f"scene {s.get('id')}"
+        prompt = s.get("image_prompt") or ""
+        used = PLACEHOLDER.findall(prompt)
+        if len(used) > rules["max_chars"]:
+            errs.append(f"{where}: image shows {len(used)} named characters ({', '.join(used)}) - {model} "
+                        f"blends faces past {rules['max_chars']}; describe the others generically")
+        bad = [w for w in NOT_DRAWABLE if re.search(rf"\b{w}\b", prompt.lower())]
+        if bad:
+            errs.append(f"{where}: image prompt uses {', '.join(bad)} - a camera can't see that; "
+                        f"describe the visible pose/action instead")
+        if not rules["clip_window"]:
+            words = len(full_prompt(s, story, channel).split())
+            if words > FLUX_MAX_WORDS:
+                errs.append(f"{where}: prompt + style is {words} words, keep it under {FLUX_MAX_WORDS}")
+            continue
+        n = ct.count(full_prompt(s, story, channel))
+        if n > ct.MAX_TOKENS:
+            costs = ", ".join(f"{{{u}}}={ct.count(chars.get(u, ''))}" for u in used)
+            errs.append(f"{where}: prompt + style is {n} CLIP tokens, limit {ct.MAX_TOKENS} - cut "
+                        f"{n - ct.MAX_TOKENS} tokens from the shot (characters cost {costs or 'nothing'})")
+        nn = ct.count(full_negative(s, story, channel))
+        if nn > ct.MAX_TOKENS:
+            errs.append(f"{where}: negative prompt is {nn} CLIP tokens, limit {ct.MAX_TOKENS} - shorten 'avoid'")
     return errs
 
 

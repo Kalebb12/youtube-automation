@@ -22,7 +22,9 @@ The result is written with "status": "draft". Read it, fix anything, then set
 Refuses to overwrite an approved story unless you pass --force.
 """
 import argparse, json, os, re, sys, time, urllib.parse, urllib.request
-from common import SCENES_DIR, channel_names, load_channel, load_dotenv, story_setting, validate_story
+import clip_tokens
+from common import (FLUX_MAX_WORDS, MODEL_RULES, SCENES_DIR, channel_names, image_model,
+                    image_problems, load_channel, load_dotenv, story_setting, validate_story)
 
 load_dotenv()
 PROVIDERS = ("gemini", "claude")
@@ -50,16 +52,44 @@ SCHEMA = {
             "type": "object",
             "properties": {
                 "narration": {"type": "string"},
-                "image_prompt": {"type": "string"},
+                "shot": {"type": "object",
+                         "properties": {
+                             "subject": {"type": "string"},
+                             "action": {"type": "string"},
+                             "setting": {"type": "string"},
+                             "camera": {"type": "string", "enum": None},   # filled from CAMERAS
+                             "lighting": {"type": "string"},
+                             "avoid": {"type": "array", "items": {"type": "string"}}},
+                         "required": ["subject", "action", "setting", "camera", "lighting", "avoid"]},
                 "refs": {"type": "array", "items": {"type": "string"}},
                 "quote": {"type": "object",
                           "properties": {"text": {"type": "string"}, "ref": {"type": "string"},
                                          "translation": {"type": "string"}},
                           "required": ["text", "ref", "translation"]}},
-            "required": ["narration", "image_prompt", "refs"]}},
+            "required": ["narration", "shot", "refs"]}},
     },
     "required": ["title", "characters", "scenes"],
 }
+
+
+CAMERAS = ["extreme wide shot", "wide shot", "medium shot", "medium close-up", "close-up",
+           "extreme close-up", "low-angle shot", "high-angle shot", "top-down shot",
+           "over-the-shoulder shot", "silhouette shot"]
+SCHEMA["properties"]["scenes"]["items"]["properties"]["shot"]["properties"]["camera"]["enum"] = CAMERAS
+
+
+def compose_prompt(shot, model="sdxl"):
+    """Build the image prompt in priority order: who, doing what, where, framing, light.
+    SDXL gets comma-separated phrases; FLUX.2 (an LLM text encoder) gets sentences.
+    The channel style is appended later by generate.py."""
+    clean = lambda p: " ".join(str(p or "").split()).strip(" ,.")
+    who = f"{clean(shot.get('subject'))} {clean(shot.get('action'))}".strip()
+    if model == "sdxl":
+        parts = [who, shot.get("setting"), shot.get("camera"), shot.get("lighting")]
+        return ", ".join(clean(p) for p in parts if clean(p))
+    first = ", ".join(p for p in (who, clean(shot.get("setting"))) if p)
+    second = ", ".join(p for p in (clean(shot.get("camera")), clean(shot.get("lighting"))) if p)
+    return ". ".join(p[:1].upper() + p[1:] for p in (first, second) if p)
 
 
 def _strict(schema):
@@ -94,6 +124,46 @@ def fetch_passage(passage, translation):
 def build_prompt(channel, brief, source_label, source_text, n_scenes, word_budget, translation,
                  previous=None):
     n = channel["narrator"]
+    model = image_model({}, channel)
+    rules = MODEL_RULES[model]
+    style_tokens = clip_tokens.count(channel["style"])
+    limit = clip_tokens.MAX_TOKENS
+    scene_budget = limit - style_tokens - 1
+    surface_rule = ("" if model == "sdxl" else
+                    "\n  - plain surfaces: walls, stones and cloth carry no writing, inscriptions, signs or "
+                    "symbols (this model can't be told \"no text\" any other way).")
+    if model == "sdxl":
+        char_rule = (f"compact comma-separated VISUAL tags, at most {rules['char_max_tokens']} CLIP tokens "
+                     f"(about 12 words)")
+        subject_rule = ("exactly ONE {NAME} placeholder (a group like {BROTHERS} counts as one), or a "
+                        "short generic description (\"a lone traveller\") for minor figures. Never two named "
+                        "characters in one image: SDXL blends their faces.")
+        avoid_rule = ("up to 3 short things SDXL is likely to get wrong in THIS shot (e.g. \"beard\" for a "
+                      "beardless boy, \"crowd\" for a lone figure); [] if none.")
+        budget_rule = (f"BUDGET (hard limit - SDXL silently drops everything past it): each finished prompt = "
+                       f"subject (with the placeholder replaced by its description) + action + setting + "
+                       f"camera + lighting + the channel style ({style_tokens} tokens) must fit {limit} CLIP "
+                       f"tokens. That leaves {scene_budget} tokens for everything in the shot INCLUDING the "
+                       f"character description - so keep action, setting and lighting terse (a few words "
+                       f"each). One CLIP token is roughly 0.75 of a word.")
+    else:   # flux2-klein: LLM text encoder, 512-token window, no negative prompt
+        char_rule = (f"a short natural-language visual description, at most {rules['char_max_tokens']} CLIP "
+                     f"tokens (about 25 words)")
+        subject_rule = ("one {NAME} placeholder, or at most two when the moment needs both people "
+                        "(e.g. \"{REUBEN} gripping {JOSEPH}'s arm\") - give them clearly different "
+                        "positions in the frame. Minor figures get a short generic description.")
+        avoid_rule = ("always []. This model has NO negative prompt, so state the look positively in the "
+                      "subject/action instead (\"clean-shaven\", \"an empty desert\", \"no one else in sight\").")
+        budget_rule = (f"Write each shot as vivid, specific natural description - this model reads full "
+                       f"sentences and follows detail well (about 40-80 words per shot is right). The whole "
+                       f"prompt, with character descriptions and the channel style, must stay under "
+                       f"{FLUX_MAX_WORDS} words.")
+    char_costs = ""
+    if previous and model == "sdxl":
+        char_costs = ("\n  Series characters already cost: " + ", ".join(
+            f"{{{k}}}={clip_tokens.count(v)}" for k, v in previous["characters"].items()) + " tokens.")
+    guidance = channel.get("image_guidance") or []
+    image_guidance = ("CHANNEL IMAGE RULES:\n" + "\n".join(f"- {g}" for g in guidance)) if guidance else ""
     rules = "\n".join(f"- {r}" for r in channel["story_rules"])
     max_q = int(channel.get("max_quotes", 0))
     if max_q and translation:
@@ -120,14 +190,29 @@ FORMAT RULES:
 - Narration is spoken storytelling, not a summary, not verse-by-verse paraphrase. No headings, no emojis,
   no stage directions, no "In this video". Spell out numbers.
 - refs: the source references (e.g. "Genesis 37:3") each scene draws on; [] when there is no source.
-- characters: every recurring person, with name in UPPER_SNAKE_CASE and a purely VISUAL description
-  (age, build, hair, face, clothing, colours) that stays the same in every scene. If someone's look
-  changes mid-story, add a second character entry (e.g. JOSEPH_STRIPPED).
-- image_prompt: one still image for that scene, in English, for Stable Diffusion XL. Refer to characters
-  ONLY as {{NAME}} placeholders - never repeat their description. One clear main subject; prefer one
-  character per image (SDXL blends people together); describe action, setting, camera angle and light.
-  Do NOT include art-style words (the channel adds its own style), and no text or captions in the image.
-- title: short, specific, curiosity-driven, no clickbait lies."""
+- title: short, specific, curiosity-driven, no clickbait lies.
+
+IMAGES - treat these as seriously as the narration: each scene is ONE still image made by Stable
+Diffusion XL, and the images are most of what the viewer sees.
+- characters: every recurring person, name in UPPER_SNAKE_CASE, description = {char_rule}, most
+  distinctive first (age + gender, hair, face, clothing colours). Make characters easy to tell apart.
+  If someone's look changes mid-story, add a second entry (e.g. JOSEPH_STRIPPED).
+- shot (one per scene) - the picture of THIS scene's key moment:
+  - subject: {subject_rule} Never write a character's description out - only the placeholder.
+  - action: a concrete, visible pose or action ("kneeling at the rim of a dry well, reaching down").
+    Only what a camera can see: no thoughts, plans, feelings-as-words, sounds, or time passing.
+  - setting: the place plus one or two concrete details.
+  - camera: vary it - never the same framing in two consecutive scenes. Scene 1 is the hook and the
+    thumbnail: make it the most striking image.
+  - lighting: time of day and quality of light, matching the mood.
+  - composition (write it into subject/action/setting): named characters in the FOREGROUND, sharp and
+    large in the frame, clearly the focus. Any crowd, guards or onlookers stay in the BACKGROUND -
+    smaller, softly out of focus, in plain muted clothing unlike any named character's colours - and
+    only as many as the moment needs. Never let extras look like a named character.{surface_rule}
+  - avoid: {avoid_rule}
+  - No art-style words (the channel appends its own style) and no text, letters or captions.
+- {budget_rule}{char_costs}
+{image_guidance}"""
     user = f"BRIEF: {brief}\n"
     if previous:
         chars = "\n".join(f"- {k}: {v}" for k, v in previous["characters"].items())
@@ -257,10 +342,19 @@ def to_story(raw, story_id, channel, source, previous=None):
             if name in story["characters"]:
                 story["characters"][name] = desc
         story["previous"] = previous["story"]
+    used = {ph for sc in raw.get("scenes") or [] for ph in re.findall(r"\{([^{}]*)\}", str((sc.get("shot") or {}).get("subject", "")))}
+    if previous:
+        # A series character used in a shot but not re-listed: bring their description along
+        for name in sorted(used - set(story["characters"])):
+            if name in previous["characters"]:
+                story["characters"][name] = previous["characters"][name]
     for i, s in enumerate(raw.get("scenes") or [], 1):
         scene = {"id": i, "refs": s.get("refs") or [],
                  "narration": " ".join(str(s.get("narration", "")).split()),
-                 "image_prompt": " ".join(str(s.get("image_prompt", "")).split())}
+                 "image_prompt": compose_prompt(s.get("shot") or {}, image_model(story, channel))}
+        avoid = [str(a).strip() for a in (s.get("shot") or {}).get("avoid") or [] if str(a).strip()]
+        if avoid and MODEL_RULES[image_model(story, channel)]["negatives"]:
+            scene["negative"] = ", ".join(avoid[:3])
         if s.get("quote"):
             scene["quote"] = s["quote"]
         story["scenes"].append(scene)
@@ -344,6 +438,11 @@ def main(argv=None):
             sid = args.id or slugify(raw.get("title", "")) or "story"
             story = to_story(raw, sid, channel, source, previous)
             errs = validate_story(story, source_text=source_text if args.passage else None)
+            new_chars = [k for k in story["characters"] if not previous or k not in previous["characters"]]
+            errs += image_problems(story, channel, new_characters=new_chars)
+            cams = [(sc.get("shot") or {}).get("camera") for sc in raw.get("scenes") or []]
+            errs += [f"scenes {i} and {i + 1} both use '{c}' - vary the camera"
+                     for i, (c, d) in enumerate(zip(cams, cams[1:]), 1) if c and c == d]
             words = sum(len(s["narration"].split()) for s in story["scenes"])
             if words > word_budget * 1.15:
                 errs.append(f"narration is {words} words; it must be at most {word_budget} words "

@@ -1,0 +1,79 @@
+{
+  "story": "fiery_furnace",
+  "channel": "bible",
+  "title": "Three Men, One Furnace, and a Fourth Figure",
+  "status": "approved",
+  "source": {
+    "brief": "Shadrach, Meshach and Abednego refuse to bow to Nebuchadnezzar's golden image, are thrown into the fiery furnace heated seven times hotter, and a fourth figure walks with them in the fire; they come out unburned",
+    "passage": "Daniel 3:13-28",
+    "translation": "KJV"
+  },
+  "characters": {
+    "NEBUCHADNEZZAR": "Middle-aged king, long curled black beard, tall gold crown, deep purple robe embroidered with gold, gold armbands, stern dark eyes",
+    "THREE_HEBREWS": "Three young Hebrew men, short dark beards, long robes of blue, green and rust red, white head cloths, standing close together"
+  },
+  "scenes": [
+    {
+      "id": 1,
+      "refs": [
+        "Daniel 3:13",
+        "Daniel 3:14"
+      ],
+      "narration": "King Nebuchadnezzar was in a fury. Three men, Shadrach, Meshach and Abednego, had refused to worship his golden image.",
+      "image_prompt": "{NEBUCHADNEZZAR} rising from a carved stone throne, one arm thrust out pointing down at the floor before him, jaw clenched, eyes narrowed in anger, a vast Babylonian throne hall of glazed blue brick, a towering golden statue visible through a great arched doorway behind the throne. Low-angle shot, harsh midday sun streaming through the doorway, gold statue gleaming, deep shadows across the hall"
+    },
+    {
+      "id": 2,
+      "refs": [
+        "Daniel 3:15"
+      ],
+      "narration": "Bow when the music plays, he warned, or be thrown into a burning furnace. Who is the god who could save you from my hands?",
+      "image_prompt": "{NEBUCHADNEZZAR} leaning forward on his throne, one fist raised and clenched, the other hand pointing sideways toward a distant orange glow, lips pulled back in a scowl, the throne hall, robed musicians holding harps and horns lowered along the wall behind him. Medium close-up, warm daylight mixed with a flickering orange glow from the side"
+    },
+    {
+      "id": 3,
+      "refs": [
+        "Daniel 3:16",
+        "Daniel 3:17",
+        "Daniel 3:18"
+      ],
+      "narration": "Their God could deliver them, they said. “But if not, be it known unto thee, O king, that we will not serve thy gods.”",
+      "image_prompt": "{THREE_HEBREWS} standing upright side by side on the stone floor, heads level, hands open at their sides, facing a distant throne without bowing, while rows of courtiers around them kneel low, the wide blue-brick throne hall, golden pillars, the king small on his throne at the far end. Wide shot, bright, even daylight from high windows",
+      "quote": {
+        "text": "But if not, be it known unto thee, O king, that we will not serve thy gods.",
+        "ref": "Daniel 3:18",
+        "translation": "KJV"
+      }
+    },
+    {
+      "id": 4,
+      "refs": [
+        "Daniel 3:19",
+        "Daniel 3:20",
+        "Daniel 3:21",
+        "Daniel 3:22",
+        "Daniel 3:23"
+      ],
+      "narration": "His face changed. He had the furnace heated seven times hotter. His strongest soldiers threw the three in bound, and the flames killed those soldiers.",
+      "image_prompt": "{THREE_HEBREWS} bound with ropes at the wrists, fully clothed in their robes and head cloths, being pushed forward by muscular soldiers in bronze helmets toward a roaring furnace opening, a huge brick furnace with an arched mouth, flames billowing out, a stone ramp leading up to it. High-angle shot, blinding orange firelight, heat shimmer, dark smoke rising"
+    },
+    {
+      "id": 5,
+      "refs": [
+        "Daniel 3:24",
+        "Daniel 3:25"
+      ],
+      "narration": "The king sprang up. Three bound men had gone in. Now he saw four, loose, walking unhurt in the fire, the fourth like the Son of God.",
+      "image_prompt": "Four upright robed men walking freely inside the furnace, ropes gone, the fourth man a tall plain robed figure beside the other three strolling calmly through the flames, arms loose at their sides, seen as dark outlines against the fire, the interior of the great brick furnace, walls of roaring flame on every side. Silhouette shot, intense white-orange firelight behind the figures, outlining them in black"
+    },
+    {
+      "id": 6,
+      "refs": [
+        "Daniel 3:26",
+        "Daniel 3:27"
+      ],
+      "narration": "He called them out. Not a hair was singed, not a coat changed, not even the smell of fire on them.",
+      "image_prompt": "{THREE_HEBREWS} stepping out of the furnace mouth, {NEBUCHADNEZZAR} standing at left with hands raised in astonishment, the three walking down the stone ramp with clean robes and neat head cloths, while the king stares wide-eyed and robed officials crowd behind him, leaning close, the base of the brick furnace, embers glowing in its arched opening. Medium shot, fading orange firelight blending with soft late afternoon sun"
+    }
+  ]
+}

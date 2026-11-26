@@ -4,7 +4,7 @@ Brief in, narrated YouTube Short out. Drafts come from Gemini (free) or Claude (
 Works for any niche: each channel is a profile in `channels/` (`bible.json` and `horror.json` included).
 
 ```
-python script.py --channel bible --passage "Genesis 37:12-24" --brief "Joseph part 2"   # 0. draft
+python script.py --channel bible --passage "Daniel 3:13-28" --brief "the fiery furnace" # 0. draft
 #   read scenes/<id>.json, fix it, set "status": "approved"                              #    YOU review
 python run_kaggle.py                                                                     # 1. images (Kaggle GPU)
 python voice.py                                                                          # 2. narration (laptop)
@@ -14,7 +14,7 @@ python assemble.py                                                              
 Final video: `images/<story>/<story>.mp4`.
 
 **Guides:** [making an episode](docs/making-an-episode.md) ·
-[channel profiles](docs/channels.md) · [troubleshooting](docs/troubleshooting.md) ·
+[images](docs/images.md) · [channel profiles](docs/channels.md) · [motion](docs/motion.md) · [music](docs/music.md) · [troubleshooting](docs/troubleshooting.md) ·
 [how it works](docs/how-it-works.md)
 
 ## One-time setup
@@ -27,9 +27,10 @@ Final video: `images/<story>/<story>.mp4`.
    - Mac/Linux: `~/.kaggle/kaggle.json` then run `chmod 600 ~/.kaggle/kaggle.json`
 5. Install everything: `pip install -r requirements.txt` (and `sudo apt install ffmpeg` if you don't have it)
 6. Check it works: `kaggle kernels list --mine` (should print without errors)
-7. **Cache the model on Kaggle (once):** `python run_kaggle.py --setup-model`
-   A CPU-only Kaggle job (no GPU hours) downloads only the SDXL files we use (~7 GB) and saves
-   them as its output. ~10-20 min. Never needed again unless you change models.
+7. **Cache the image model on Kaggle (once):** `python run_kaggle.py --setup-model`
+   A CPU-only Kaggle job (no GPU hours) downloads only the files the channels' image model needs
+   (FLUX.2 klein 4B: ~16 GB; SDXL: ~7 GB) and saves them as its output. Never needed again unless
+   you add a model.
 8. **Drafting model (pick one or both):**
    - Gemini (free): create a key at https://aistudio.google.com/apikey and put `GEMINI_API_KEY=...` in `.env`
    - Claude (paid, ~$0.05-0.10 per draft): `ant auth login`, or `ANTHROPIC_API_KEY=...` in `.env`;
@@ -73,7 +74,8 @@ python run_kaggle.py --download      # re-download the last finished run
   approved, nothing is sent to Kaggle. Approved stories are validated first.
 - The channel profiles go up with them, so each story gets its channel's look (`style`/`negative`).
 - Refuses to start if the model cache doesn't exist (run `--setup-model` first).
-- ~1 min to load the model, then ~30 s per image. Images land in `images/<story>/`.
+- FLUX.2 klein on the free T4: ~90 s to load, ~90 s per image (6 scenes ≈ 10 min). Images land in
+  `images/<story>/`.
 
 ## 2. Narration — `voice.py`  ·  3. Video — `assemble.py`
 
@@ -85,9 +87,13 @@ python assemble.py [story]           # -> images/<story>/<story>.mp4
 - Voice and speed come from the channel profile (`voice.py --voices` lists Kokoro voices;
   `--voice am_michael` to try one). First run downloads the voice model (~350 MB) once.
 - Narration is cached and read from `scenes/`, so fixing a typo doesn't need a GPU re-run.
-- Each image stays up exactly as long as its narration, with a slow zoom and burned-in subtitles.
-- **Music:** put royalty-free tracks in `music/<channel>/` (or `music/`); the first one is mixed
-  quietly under the voice. `--music file.mp3` / `--no-music` to override.
+- Each image stays up exactly as long as its narration as a slow camera move with **depth parallax**
+  (near things move against the background), **crossfading** into the next, with a fade in from and
+  out to black, and burned-in subtitles. Tune with `--strength`, `--transition`, `--flat`. See [motion](docs/motion.md).
+- **Music:** put royalty-free tracks in `music/<channel>/` (mood sub-folders optional). Each story
+  gets a track from the pool, levelled and ducked under the narration. Audition in seconds with
+  `python music.py preview <story> --track x.mp3 --volume-db -16`, save with `music.py set`.
+  See [music](docs/music.md).
 
 ## Story file
 
@@ -105,9 +111,10 @@ python assemble.py [story]           # -> images/<story>/<story>.mp4
 ```
 
 - Describe each person once in `characters`; use `{NAME}` in prompts so they look the same every scene.
-  Keep to one main character per image — SDXL blends people together.
+  Keep to one or two characters per image (one on SDXL, which blends people together).
+- Images use the channel's `image_model`: `flux2-klein` (FLUX.2 klein 4B, default) or `sdxl`.
 - Add `"seed": 555` to a scene to re-roll just that image.
-- A story can override its channel's `style`, `negative`, `format`, `voice`, `speed`.
+- A story can override its channel's `motion`, `image_model`, `style`, `negative`, `format`, `voice`, `speed`, `music`.
 - Direct quotes must be public-domain (KJV/ASV/WEB for Bible), in quotation marks, and listed in `quote`.
 
 ## New channel / niche
